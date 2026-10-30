@@ -2,10 +2,10 @@
 
 Odds snapshot tags (computed at fetch time from kickoff):
   opening       first time we ever stored this fixture+market
-  T-6h / T-1h   fetched within ~6h / ~1h of kickoff
+  T-6h / T-1h   fetched 5-7 h / 0.25-1.75 h before kickoff (SNAPSHOT_WINDOWS)
   interim       any other pre-kickoff fetch
   post_kickoff  fetched after kickoff (kept for audit, ignored by predict)
-Schedule ``epl sync odds`` (cron) e.g. daily + at T-6h and T-1h.
+``epl sync due`` (see scheduler.py) fetches exactly when a tag is due.
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ from .parse import NOT_STARTED_STATE, parse_fixture, parse_odds, parse_teams
 log = logging.getLogger(__name__)
 
 
+SNAPSHOT_WINDOWS = {"T-6h": (5.0, 7.0), "T-1h": (0.25, 1.75)}  # hours before kickoff
+
+
 def snapshot_tag(hours_to_kickoff: float | None, is_first: bool) -> str:
     if hours_to_kickoff is not None and hours_to_kickoff < 0:
         return "post_kickoff"
@@ -30,10 +33,9 @@ def snapshot_tag(hours_to_kickoff: float | None, is_first: bool) -> str:
         return "opening"
     if hours_to_kickoff is None:
         return "interim"
-    if hours_to_kickoff <= 1.5:
-        return "T-1h"
-    if hours_to_kickoff <= 6.5:
-        return "T-6h"
+    for tag, (lo, hi) in SNAPSHOT_WINDOWS.items():
+        if lo <= hours_to_kickoff <= hi:
+            return tag
     return "interim"
 
 
@@ -100,12 +102,14 @@ def sync_fixture(client: SportmonksClient, conn: sqlite3.Connection, fixture_id:
     return parse_fixture(fx)
 
 
-def upcoming_fixture_ids(conn: sqlite3.Connection, days: int, now: datetime | None = None) -> list[int]:
+def upcoming_fixture_ids(conn: sqlite3.Connection, days: int, now: datetime | None = None,
+                         league_id: int = EPL_LEAGUE_ID) -> list[int]:
     now = now or datetime.now(timezone.utc)
     lo, hi = int(now.timestamp()), int((now + timedelta(days=days)).timestamp())
     rows = conn.execute(
-        "SELECT id FROM fixtures WHERE starting_at_timestamp BETWEEN ? AND ? AND (state_id IS NULL OR state_id=?) "
-        "ORDER BY starting_at_timestamp", (lo, hi, NOT_STARTED_STATE)).fetchall()
+        "SELECT id FROM fixtures WHERE league_id=? AND starting_at_timestamp BETWEEN ? AND ? "
+        "AND (state_id IS NULL OR state_id=?) ORDER BY starting_at_timestamp",
+        (league_id, lo, hi, NOT_STARTED_STATE)).fetchall()
     return [r["id"] for r in rows]
 
 

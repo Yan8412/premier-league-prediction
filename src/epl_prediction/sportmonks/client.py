@@ -164,8 +164,11 @@ class SportmonksClient:
             stop = min(end, cur + timedelta(days=MAX_RANGE_DAYS - 1))
             params = {"include": include, "filters": f"fixtureLeagues:{league_id}"}
             for fx in self.paginate(f"fixtures/between/{cur.isoformat()}/{stop.isoformat()}", params):
-                if fx.get("league_id") in (None, league_id):
+                if fx.get("league_id") == league_id:
                     out[fx["id"]] = fx
+                else:
+                    log.warning("dropping fixture %s with league_id=%s (expected %s)",
+                                fx.get("id"), fx.get("league_id"), league_id)
             cur = stop + timedelta(days=1)
         return sorted(out.values(), key=lambda f: (f.get("starting_at_timestamp") or 0, f["id"]))
 

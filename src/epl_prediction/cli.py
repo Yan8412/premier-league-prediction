@@ -47,6 +47,12 @@ def cmd_sync(args) -> int:
 
     client, conn = _client(), _conn(args)
     what = args.what
+    if what == "due":
+        from .sportmonks.scheduler import run_due
+
+        print(json.dumps(run_due(client, conn, horizon_days=args.horizon_days, refresh_hours=args.refresh_hours),
+                         indent=2, default=str))
+        return 0
     if what in ("seasons", "all"):
         rows = sync.sync_seasons(client, conn, args.league_id)
         print(f"seasons: {len(rows)} stored")
@@ -103,6 +109,23 @@ def cmd_smoke(args) -> int:
             books = {o.get("bookmaker_id") for o in odds}
             print(f"market {mid}: {len(odds)} selections from {len(books)} bookmakers")
     print(f"requests made: {client.requests_made}; rate limit: {client.last_rate_limit}")
+    return 0
+
+
+def cmd_audit(args) -> int:
+    from .audit import audit_db
+
+    report = audit_db(_conn(args))
+    if not args.verbose_mapping:
+        report.pop("team_name_mapping")
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0 if report["ok"] else 1
+
+
+def cmd_coverage(args) -> int:
+    from .sportmonks.scheduler import coverage
+
+    print(json.dumps(coverage(_conn(args)), indent=2, ensure_ascii=False))
     return 0
 
 
@@ -209,7 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("sync", help="sync Sportmonks data into SQLite (needs SPORTMONKS_API_TOKEN)")
-    s.add_argument("what", choices=["seasons", "fixtures", "fixture", "odds", "all"])
+    s.add_argument("what", choices=["seasons", "fixtures", "fixture", "odds", "all", "due"],
+                   help="due = scheduler tick for cron: refresh fixtures + fetch only due odds snapshots")
     s.add_argument("--league-id", type=int, default=EPL_LEAGUE_ID)
     s.add_argument("--season-id", type=int)
     s.add_argument("--from", dest="date_from", help="YYYY-MM-DD (fixtures)")
@@ -217,7 +241,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fixture-id", type=int, action="append", help="repeatable")
     s.add_argument("--upcoming-days", type=int, default=7, help="odds: fixtures kicking off within N days")
     s.add_argument("--markets", default=f"{MARKET_FT_1X2},{MARKET_HT_FT}", help="odds market ids (default 1,29)")
+    s.add_argument("--horizon-days", type=int, default=14, help="due: look-ahead for opening snapshots")
+    s.add_argument("--refresh-hours", type=float, default=24.0, help="due: interim refresh age")
     s.set_defaults(func=cmd_sync)
+
+    au = sub.add_parser("audit", help="data-quality audit of the SQLite DB (league filter, team names)")
+    au.add_argument("--verbose-mapping", action="store_true", help="include the full team-name mapping")
+    au.set_defaults(func=cmd_audit)
+
+    cv = sub.add_parser("coverage", help="odds snapshot tags per upcoming/recent fixture (markets 1, 29)")
+    cv.set_defaults(func=cmd_coverage)
 
     sm = sub.add_parser("smoke", help="live Sportmonks smoke test (skips without token)")
     sm.set_defaults(func=cmd_smoke)

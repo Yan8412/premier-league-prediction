@@ -68,19 +68,39 @@ epl sync all                             # seasons + 当前赛季 fixtures + 未
 
 - include 用 `;` 分隔；filter 形如 `filters=fixtureLeagues:8`。
 - `fixtures/between` 单次最长 100 天，客户端自动切分时间窗。
-- 分页为游标式：读取 `pagination.has_more` / `next_cursor`，下一页传 `cursor=`，**且不能再带 `per_page`**（否则 400）。
+- 分页：线上 `pagination.next_page` / `next_cursor` 返回的是**完整 URL**。客户端优先从 `next_page` 取 `page` 号（保留 `per_page`）；否则从 `next_cursor` 中提取 `cursor` 令牌（此时**不能**带 `per_page`，否则 400）；绝不把整个 URL 当作 cursor。
+- 联赛过滤：除 `filters=fixtureLeagues:8` 外，客户端再严格校验 `league_id == 8`（缺失或其他联赛的比赛会被丢弃并记录 warning）；`--matchday next`、待抓赔率列表、训练历史也都只取 `league_id = 8`。
 - 比分：`scores[].description` 为 `1ST_HALF`（半场比分）、`2ND_HALF`（常规时间结束时的累计比分）、`CURRENT`（最新/最终）；`score.participant` 为 `home`/`away`。主客队取自 `participants[].meta.location`。
 - 已完赛状态：`state_id ∈ {5, 7, 8}`；未开赛：`state_id = 1`。
 - 限流按实体按小时计（响应体 `rate_limit.remaining / resets_in_seconds`）；遇到 429/5xx 自动指数退避重试，401/403 直接报错（403 通常表示套餐不含 Odds add-on）。
 
 ### 赔率快照（opening / T-6h / T-1h）
 
-标准赛前赔率接口只返回**当前**价格，没有历史，所以“开盘价”和“赛前 X 小时”的价格只能靠我们按时抓取并保存。每次 `epl sync odds` 都会追加一份快照到 `odds_snapshots`，并按距开球时间打标签：
+标准赛前赔率接口只返回**当前**价格，没有历史，所以“开盘价”和“赛前 X 小时”的价格只能靠我们按时抓取并保存。每次抓取都会追加一份快照到 `odds_snapshots`，并按距开球时间打标签：
 
 - `opening`：该比赛该市场第一次被抓到；
-- `T-6h`（≤6.5 小时）、`T-1h`（≤1.5 小时）、`interim`（其他赛前）、`post_kickoff`（开球后，仅留档）。
+- `T-6h`：开球前 5–7 小时；`T-1h`：开球前 0.25–1.75 小时；
+- `interim`：其他赛前抓取；`post_kickoff`：开球后（仅留档，预测不用）。
 
-建议在运营机器上用 cron 调度，例如：每天一次 `epl sync odds --upcoming-days 7`，另外在比赛日每小时跑一次 `epl sync odds --upcoming-days 1`（这样能覆盖 T-6h 与 T-1h）。`epl predict` 默认使用开球前最新的一份快照。
+**调度器 `epl sync due`**（推荐，每 15 分钟跑一次）：
+
+1. 距上次刷新超过 6 小时则刷新未来 14 天的英超赛程（开球时间可能改动）；
+2. 只抓“到期”的比赛：还没有任何快照 → `opening`；进入 T-6h / T-1h 窗口且该标签还没有 → 抓一次；距上次快照超过 24 小时（且开球在 7 小时以后）→ `interim` 刷新；
+3. 每轮请求数 = 到期比赛数 × 2 个市场，远低于每实体每小时的限额。
+
+```bash
+epl sync due                       # 一次调度 tick（cron 调用它）
+epl sync due --horizon-days 10 --refresh-hours 12
+epl coverage                       # 查看每场比赛 market 1 / 29 已有哪些快照标签
+```
+
+运营机 crontab 示例见 [`deploy/crontab.example`](deploy/crontab.example)（每 15 分钟 `sync due`、每天同步赛程/比分、每天两次 `predict --matchday next`、每天 `audit`）。时间统一用 UTC。`epl predict` 默认使用开球前最新的一份快照（通常就是 T-1h）。
+
+### 数据质量审计 `epl audit`
+
+检查数据库：非 `league_id=8` 的比赛、无法映射到 football-data 队名的球队（需要在 `src/epl_prediction/team_names.csv` 增加别名）、每赛季球队数是否为 20、每轮比赛是否超过 10 场、重复对阵，以及与同赛季 football-data E0 CSV 的球队集合对比。有 error 时退出码为 1。
+
+> 关于 “下一轮出现 Hull / Coventry”：经核对，football-data 2026/27 的 E0（英超）文件中 Coventry、Hull、Ipswich 均为升班马，属于正常英超球队，并非联赛过滤泄漏。为防止真正的泄漏，客户端已改为严格校验 `league_id == 8`（此前 `league_id` 缺失的比赛会被放行），并新增 `epl audit` 供运营机定期核查。
 
 ### market 29（HT/FT）覆盖稀疏时的降级
 
