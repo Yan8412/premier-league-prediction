@@ -21,6 +21,8 @@ from . import __version__
 from .config import EPL_LEAGUE_ID, MARKET_FT_1X2, MARKET_HT_FT, REPORTS_DIR
 from .data.football_data import load_all
 from .data.teams import canonical_team
+from .data.xg import attach_xg
+from .data.xg import load_store as load_xg_store
 from .models.dixon_coles import DixonColesModel, dc_score_matrix, invert_1x2
 from .contract import consistency_metrics
 from .models.ensemble import log_pool
@@ -48,28 +50,37 @@ class FixtureInput:
 
 # ------------------------------------------------------------------ history
 def load_history(conn: sqlite3.Connection | None = None) -> pd.DataFrame:
-    """football-data CSVs plus finished Sportmonks fixtures (canonical names)."""
+    """football-data CSVs plus finished Sportmonks fixtures (canonical names), with xG
+    attached from football-data, Sportmonks xGFixture and the ``data/xg`` store."""
     fd = load_all()
-    hist = fd.loc[fd["result"] >= 0, ["date", "home", "away", "hg", "ag", "hthg", "htag"]].copy()
+    hist = fd.loc[fd["result"] >= 0, ["date", "home", "away", "hg", "ag", "hthg", "htag", "hxg", "axg"]].copy()
+    xg_sources = []
     if conn is not None:
         rows = conn.execute(
-            f"SELECT starting_at, home_team, away_team, ft_home, ft_away, ht_home, ht_away FROM fixtures "
+            f"SELECT starting_at, home_team, away_team, ft_home, ft_away, ht_home, ht_away, xg_home, xg_away FROM fixtures "
             f"WHERE league_id={EPL_LEAGUE_ID} AND state_id IN ({','.join(map(str, FINISHED_STATES))}) "
             f"AND ft_home IS NOT NULL").fetchall()
         if rows:
             sm = pd.DataFrame([{
                 "date": pd.Timestamp(r["starting_at"][:10]), "home": canonical_team(r["home_team"]),
                 "away": canonical_team(r["away_team"]), "hg": r["ft_home"], "ag": r["ft_away"],
-                "hthg": r["ht_home"], "htag": r["ht_away"]} for r in rows])
-            sm[["hg", "ag", "hthg", "htag"]] = sm[["hg", "ag", "hthg", "htag"]].astype(float)
+                "hthg": r["ht_home"], "htag": r["ht_away"], "hxg": r["xg_home"], "axg": r["xg_away"]} for r in rows])
+            num = ["hg", "ag", "hthg", "htag", "hxg", "axg"]
+            sm[num] = sm[num].astype(float)
+            xg_sources.append(sm.loc[sm["hxg"].notna() & sm["axg"].notna(),
+                                     ["date", "home", "away", "hxg", "axg"]].assign(source="sportmonks"))
             hist = pd.concat([hist, sm], ignore_index=True)
             hist = hist.drop_duplicates(subset=["date", "home", "away"], keep="first")
+    xg_sources.append(load_xg_store())
+    hist = attach_xg(hist, xg_sources)
     return hist.sort_values("date").reset_index(drop=True)
 
 
-def fit_football(history: pd.DataFrame, as_of: pd.Timestamp | None = None) -> DixonColesModel:
+def fit_football(history: pd.DataFrame, as_of: pd.Timestamp | None = None,
+                 xg_weight: float | None = None) -> DixonColesModel:
     as_of = as_of or pd.Timestamp(datetime.now(timezone.utc).date())
-    return DixonColesModel().fit(history, as_of=as_of)
+    model = DixonColesModel() if xg_weight is None else DixonColesModel(xg_weight=xg_weight)
+    return model.fit(history, as_of=as_of)
 
 
 def load_pool_weight(report: Path = REPORTS_DIR / "backtest_epl.json", kind: str = "close") -> float:
@@ -152,7 +163,8 @@ def predict_fixture(model: DixonColesModel, fx: FixtureInput, pool_weight: float
         "expected_goals": {"home": round(lam, 3), "away": round(mu, 3)},
         "expected_goals_first_half": {"home": round(lam * model.ht_share_home, 3),
                                       "away": round(mu * model.ht_share_away, 3)},
-        "model_version": f"football-dixon-coles/{__version__} (xi={model.xi}, l2={model.l2})",
+        "model_version": f"football-dixon-coles/{__version__} (xi={model.xi}, l2={model.l2}, "
+                         f"xg_weight={model.xg_weight}, xg_matches={model.n_xg_matches})",
         "generated_at": generated_at, "notes": f_notes,
     }
 

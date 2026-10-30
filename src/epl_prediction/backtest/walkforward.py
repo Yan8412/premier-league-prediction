@@ -23,6 +23,8 @@ import pandas as pd
 from .. import __version__
 from ..config import REPORTS_DIR
 from ..data.football_data import load_all
+from ..data.xg import attach_xg
+from ..data.xg import load_store as load_xg_store
 from ..models.dixon_coles import DEFAULT_XI, DixonColesModel, dc_score_matrix, invert_1x2
 from ..models.ensemble import fit_pool_weight, log_pool_rows
 from ..models.halftime import htft_index, htft_probs
@@ -38,6 +40,7 @@ class BacktestConfig:
     test_seasons: list[str] | None = None  # default: every season except the first (warm-up)
     xi: float = DEFAULT_XI
     l2: float = 1e-2
+    xg_weight: float = 0.5
     max_days: int = 1100
     devig_method: str = "shin"
     prior_weight: float = 0.5
@@ -50,6 +53,7 @@ class BacktestResult:
     predictions: pd.DataFrame
     weights: dict[str, dict[str, float]] = field(default_factory=dict)
     runtime_s: float = 0.0
+    n_xg_matches: int = 0
 
 
 def _market_probs(odds_dicts: pd.Series, method: str) -> np.ndarray:
@@ -71,7 +75,7 @@ def run_backtest(cfg: BacktestConfig | None = None, log=print) -> BacktestResult
     df = load_all(cfg.data_dir) if cfg.data_dir else load_all()
     seasons = sorted(df["season"].unique())
     test_seasons = cfg.test_seasons or seasons[1:]
-    played = df[df["result"] >= 0].copy()
+    played = attach_xg(df[df["result"] >= 0].copy(), [load_xg_store()])
 
     test = played[played["season"].isin(test_seasons)].copy()
     test["week"] = test["date"] - pd.to_timedelta(test["date"].dt.weekday, unit="D")
@@ -81,7 +85,8 @@ def run_backtest(cfg: BacktestConfig | None = None, log=print) -> BacktestResult
     model: DixonColesModel | None = None
     weeks = sorted(test["week"].unique())
     for k, week in enumerate(weeks):
-        model = DixonColesModel(xi=cfg.xi, l2=cfg.l2).fit(played, as_of=week, max_days=cfg.max_days, warm_start=model)
+        model = DixonColesModel(xi=cfg.xi, l2=cfg.l2, xg_weight=cfg.xg_weight).fit(
+            played, as_of=week, max_days=cfg.max_days, warm_start=model)
         block = test[test["week"] == week]
         for _, r in block.iterrows():
             lam, mu = model.expected_goals(r["home"], r["away"])
@@ -149,7 +154,8 @@ def run_backtest(cfg: BacktestConfig | None = None, log=print) -> BacktestResult
     pred[[f"bh_{k}" for k in range(9)]] = base
 
     pred = pred.drop(columns=["matrix", "odds_close", "odds_open", "htft"])
-    return BacktestResult(cfg, pred, weights, time.time() - t0)
+    n_xg = int((played["hxg"].notna() & played["axg"].notna()).sum())
+    return BacktestResult(cfg, pred, weights, time.time() - t0, n_xg)
 
 
 def htft_metrics(pred: pd.DataFrame) -> dict[str, dict]:
@@ -201,9 +207,10 @@ def write_report(result: BacktestResult, out_dir: Path = REPORTS_DIR, name: str 
         "model_version": f"epl-prediction {__version__}",
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "data": "football-data.co.uk E0 CSVs in data/football_data/",
-        "config": {"test_seasons": sorted(pred["season"].unique().tolist()), "xi_per_day": cfg.xi, "l2": cfg.l2,
+        "config": {"test_seasons": sorted(pred["season"].unique().tolist()), "xi_per_day": cfg.xi, "l2": cfg.l2, "xg_weight": cfg.xg_weight,
                    "max_days": cfg.max_days, "devig_method_1x2": cfg.devig_method, "prior_weight": cfg.prior_weight},
         "n_matches": int(len(pred)),
+        "n_training_matches_with_xg": result.n_xg_matches,
         "n_matches_scored_all_tracks": overall["football"]["n"],
         "n_matches_with_unseen_team": int(len(unseen)),
         "base_rates_HDA": base_rates,
@@ -226,7 +233,9 @@ def write_report(result: BacktestResult, out_dir: Path = REPORTS_DIR, name: str 
         "",
         f"- 生成时间 generated_at: `{payload['generated_at']}`  模型版本: `{payload['model_version']}`",
         f"- 数据: football-data.co.uk E0（`data/football_data/`），测试赛季 {', '.join(payload['config']['test_seasons'])}",
-        f"- 每周（周一为界）用此前全部比赛重拟合 Dixon-Coles：xi={cfg.xi}/天，L2={cfg.l2}，窗口 {cfg.max_days} 天",
+        f"- 每周（周一为界）用此前全部比赛重拟合 Dixon-Coles：xi={cfg.xi}/天，L2={cfg.l2}，窗口 {cfg.max_days} 天，"
+        f"xG 混合权重 {cfg.xg_weight}（有 xG 的比赛用 a·xG+(1-a)·进球 作为泊松目标；"
+        f"训练集中有 xG 的比赛 {payload['n_training_matches_with_xg']} 场）",
         f"- 市场：各家庄 1X2 赔率逐家 {cfg.devig_method} 去水后取平均；closing=收盘赔率，open=开盘（周五前后采集）",
         "- 集成：对数意见池 p ∝ p_football^w · p_market^(1-w)，w 仅用更早赛季的样本外预测最小化 log-loss 拟合",
         f"- 共 {payload['n_matches']} 场；三轨同口径评分 {payload['n_matches_scored_all_tracks']} 场；"
