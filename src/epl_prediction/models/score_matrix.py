@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.stats import poisson
 
 OUTCOMES_1X2 = ("H", "D", "A")
 # HT/FT order used everywhere: first symbol = half-time result, second = full-time.
@@ -48,3 +49,21 @@ def reweight_to_1x2(m: np.ndarray, target_1x2: np.ndarray) -> np.ndarray:
         if cur > 0:
             out[mask] *= tgt / cur
     return normalise(out)
+
+
+RHO_BOUNDS = (-0.25, 0.25)
+
+
+def tau_matrix(lam: float, mu: float, rho: float, max_goals: int) -> np.ndarray:
+    t = np.ones((max_goals + 1, max_goals + 1))
+    t[0, 0] = 1.0 - lam * mu * rho
+    t[0, 1] = 1.0 + lam * rho
+    t[1, 0] = 1.0 + mu * rho
+    t[1, 1] = 1.0 - rho
+    return np.clip(t, 1e-10, None)
+
+
+def dc_score_matrix(lam: float, mu: float, rho: float, max_goals: int = 10) -> np.ndarray:
+    goals = np.arange(max_goals + 1)
+    m = np.outer(poisson.pmf(goals, lam), poisson.pmf(goals, mu))
+    return normalise(m * tau_matrix(lam, mu, rho, max_goals))

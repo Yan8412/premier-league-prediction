@@ -22,7 +22,9 @@ from .config import MARKET_FT_1X2, MARKET_HT_FT, REPORTS_DIR
 from .data.football_data import load_all
 from .data.teams import canonical_team
 from .models.dixon_coles import DixonColesModel, dc_score_matrix, invert_1x2
+from .contract import consistency_metrics
 from .models.ensemble import log_pool
+from .models.halftime import align_htft_to_1x2, htft_probs
 from .models.market import consensus_1x2, consensus_htft, htft_to_ft_1x2, parse_1x2_label, parse_htft_label
 from .models.score_matrix import HTFT_ORDER, matrix_to_1x2, reweight_to_1x2, top_k_scores
 from .sportmonks.parse import FINISHED_STATES, NOT_STARTED_STATE
@@ -48,15 +50,17 @@ class FixtureInput:
 def load_history(conn: sqlite3.Connection | None = None) -> pd.DataFrame:
     """football-data CSVs plus finished Sportmonks fixtures (canonical names)."""
     fd = load_all()
-    hist = fd.loc[fd["result"] >= 0, ["date", "home", "away", "hg", "ag"]].copy()
+    hist = fd.loc[fd["result"] >= 0, ["date", "home", "away", "hg", "ag", "hthg", "htag"]].copy()
     if conn is not None:
         rows = conn.execute(
-            f"SELECT starting_at, home_team, away_team, ft_home, ft_away FROM fixtures "
+            f"SELECT starting_at, home_team, away_team, ft_home, ft_away, ht_home, ht_away FROM fixtures "
             f"WHERE state_id IN ({','.join(map(str, FINISHED_STATES))}) AND ft_home IS NOT NULL").fetchall()
         if rows:
             sm = pd.DataFrame([{
                 "date": pd.Timestamp(r["starting_at"][:10]), "home": canonical_team(r["home_team"]),
-                "away": canonical_team(r["away_team"]), "hg": r["ft_home"], "ag": r["ft_away"]} for r in rows])
+                "away": canonical_team(r["away_team"]), "hg": r["ft_home"], "ag": r["ft_away"],
+                "hthg": r["ht_home"], "htag": r["ht_away"]} for r in rows])
+            sm[["hg", "ag", "hthg", "htag"]] = sm[["hg", "ag", "hthg", "htag"]].astype(float)
             hist = pd.concat([hist, sm], ignore_index=True)
             hist = hist.drop_duplicates(subset=["date", "home", "away"], keep="first")
     return hist.sort_values("date").reset_index(drop=True)
@@ -68,12 +72,15 @@ def fit_football(history: pd.DataFrame, as_of: pd.Timestamp | None = None) -> Di
 
 
 def load_pool_weight(report: Path = REPORTS_DIR / "backtest_epl.json", kind: str = "close") -> float:
-    """Football weight fitted on historical out-of-sample log-loss (latest season in the backtest report)."""
+    """Football weight fitted on historical out-of-sample log-loss (latest season in the report).
+
+    ``kind="htft"`` needs stored football + market HT/FT predictions (written by
+    ``epl review monthly``); until then the prior weight is used."""
     try:
         weights = json.loads(report.read_text(encoding="utf-8"))["ensemble_weight_football"][kind]
         return float(weights[max(weights)])
     except (OSError, KeyError, ValueError):
-        log.warning("no backtest report at %s; using prior pool weight %.2f", report, DEFAULT_POOL_WEIGHT)
+        log.info("no %r pool weight in %s; using prior %.2f", kind, report, DEFAULT_POOL_WEIGHT)
         return DEFAULT_POOL_WEIGHT
 
 
@@ -125,7 +132,8 @@ def _top2(m: np.ndarray) -> list[dict]:
 
 
 def predict_fixture(model: DixonColesModel, fx: FixtureInput, pool_weight: float = DEFAULT_POOL_WEIGHT,
-                    devig_method: str = "shin", generated_at: str | None = None) -> dict:
+                    devig_method: str = "shin", generated_at: str | None = None,
+                    htft_weight: float = DEFAULT_POOL_WEIGHT) -> dict:
     generated_at = generated_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     home, away = canonical_team(fx.home), canonical_team(fx.away)
 
@@ -133,13 +141,16 @@ def predict_fixture(model: DixonColesModel, fx: FixtureInput, pool_weight: float
     lam, mu = model.expected_goals(home, away)
     m_f = dc_score_matrix(lam, mu, model.rho, model.max_goals)
     p_f = matrix_to_1x2(m_f)
-    f_notes = ["HT/FT football path deferred to v1 (p_htft=null)"]
+    h_f = htft_probs(lam, mu, model.ht_share_home, model.ht_share_away, model.rho_ht, m_f)
+    f_notes: list[str] = []
     for side, team in (("home", home), ("away", away)):
         if team not in model.teams:
             f_notes.append(f"{side} team '{team}' unseen in training window: weak-team prior used")
     football = {
-        "p_1x2": _r(p_f), "p_htft": None, "top2_scores": _top2(m_f),
+        "p_1x2": _r(p_f), "p_htft": _r(h_f), "top2_scores": _top2(m_f),
         "expected_goals": {"home": round(lam, 3), "away": round(mu, 3)},
+        "expected_goals_first_half": {"home": round(lam * model.ht_share_home, 3),
+                                      "away": round(mu * model.ht_share_away, 3)},
         "model_version": f"football-dixon-coles/{__version__} (xi={model.xi}, l2={model.l2})",
         "generated_at": generated_at, "notes": f_notes,
     }
@@ -184,19 +195,28 @@ def predict_fixture(model: DixonColesModel, fx: FixtureInput, pool_weight: float
         e_notes.append("market unavailable: ensemble falls back to football track")
     m_e = reweight_to_1x2(m_f, p_e)
     if est_htft is not None:
-        e_notes.append("p_htft taken from market track (football HT/FT deferred to v1)")
+        h_e = log_pool([h_f, est_htft.probs], [htft_weight, 1.0 - htft_weight])
+        weights_htft = {"football": round(htft_weight, 4), "market": round(1.0 - htft_weight, 4)}
+    else:
+        h_e = h_f
+        weights_htft = {"football": 1.0, "market": 0.0}
+        e_notes.append("market HT/FT unavailable: p_htft from football track only")
+    h_e = align_htft_to_1x2(h_e, p_e)
     ensemble = {
-        "p_1x2": _r(p_e), "p_htft": _r(est_htft.probs if est_htft else None), "top2_scores": _top2(m_e),
-        "weights": weights,
+        "p_1x2": _r(p_e), "p_htft": _r(h_e), "top2_scores": _top2(m_e),
+        "weights": weights, "weights_htft": weights_htft,
         "model_version": f"ensemble-log-opinion-pool/{__version__}",
         "generated_at": generated_at, "notes": e_notes,
     }
 
+    tracks = {"football": football, "market": market, "ensemble": ensemble}
+    for t in tracks.values():
+        t["consistency"] = consistency_metrics(t)
     return {
         "fixture_id": fx.fixture_id, "home": home, "away": away, "kickoff": fx.kickoff,
         "outcome_order_1x2": ["H", "D", "A"], "outcome_order_htft": list(HTFT_ORDER),
         "usage": USAGE_NOTE,
-        "tracks": {"football": football, "market": market, "ensemble": ensemble},
+        "tracks": tracks,
     }
 
 
