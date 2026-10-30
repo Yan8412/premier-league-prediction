@@ -7,9 +7,10 @@ Verified against https://docs.sportmonks.com/v3 (Oct 2026):
   query param). We use the header so the token never appears in URLs/logs.
 * Includes are ``;``-separated (``include=participants;scores``); filters are
   ``filters=name:v1,v2``.
-* Pagination is cursor based: response ``pagination`` has ``has_more`` and
-  ``next_cursor``; pass ``cursor=...`` and do NOT send ``per_page`` with a
-  cursor (the API answers 400).
+* Pagination: response ``pagination`` has ``has_more``, ``next_page`` and
+  ``next_cursor``. Live, both links are full URLs; we follow ``page`` from
+  ``next_page`` (keeping ``per_page``), else the ``cursor`` token (without
+  ``per_page``, which the API rejects alongside a cursor).
 * Errors: 401 unauthenticated, 403 not in plan, 429 hourly per-entity rate
   limit (body ``rate_limit``: ``remaining``, ``resets_in_seconds``).
 
@@ -27,6 +28,7 @@ import logging
 import time
 from datetime import date, timedelta
 from typing import Any, Callable, Iterator
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -124,11 +126,23 @@ class SportmonksClient:
             pg = body.get("pagination") or {}
             if not pg.get("has_more"):
                 return
-            params.pop("per_page", None)
-            if pg.get("next_cursor"):
-                params["cursor"] = pg["next_cursor"]
-            else:  # legacy page-based pagination
+            # Live API (Oct 2026) returns next_page and next_cursor as full URLs;
+            # sending a URL as `cursor` gets HTTP 400.
+            next_page = _query_value(pg.get("next_page"), "page")
+            cursor = pg.get("next_cursor")
+            if cursor and str(cursor).startswith("http"):
+                cursor = _query_value(cursor, "cursor")
+            if next_page:
+                params.pop("cursor", None)
+                params["page"] = int(next_page)
+                params["per_page"] = per_page
+            elif cursor:
+                params.pop("per_page", None)  # per_page + cursor -> HTTP 400
+                params.pop("page", None)
+                params["cursor"] = cursor
+            else:
                 params["page"] = int(pg.get("current_page", params.get("page", 1))) + 1
+                params["per_page"] = per_page
         log.warning("stopped paginating %s after %d pages", path, max_pages)
 
     # ---------------------------------------------------------- endpoints
@@ -162,6 +176,17 @@ class SportmonksClient:
             params["filters"] = "bookmakers:" + ",".join(str(b) for b in bookmaker_ids)
         data = self.get(f"odds/pre-match/fixtures/{fixture_id}/markets/{market_id}", params).get("data") or []
         return data if isinstance(data, list) else [data]
+
+
+def _query_value(link: Any, key: str) -> str | None:
+    """``key`` from a pagination link: a full URL, or the bare value itself."""
+    if link is None or link == "":
+        return None
+    text = str(link)
+    if not text.startswith("http"):
+        return text if key != "page" or text.isdigit() else None
+    values = parse_qs(urlparse(text).query).get(key)
+    return values[0] if values else None
 
 
 def _json_or_text(resp: requests.Response) -> Any:

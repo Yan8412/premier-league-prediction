@@ -60,6 +60,40 @@ def test_cursor_pagination_and_league_filter(client):
     assert "per_page" not in responses.calls[1].request.url  # docs: per_page + cursor -> HTTP 400
 
 
+def _two_page_mock(url, first_pagination, second_params):
+    page1, page2 = load_fixture("fixtures_page1.json"), load_fixture("fixtures_page2.json")
+    page1["pagination"] = first_pagination
+    base = {"include": "participants;scores;round", "filters": "fixtureLeagues:8"}
+    responses.get(url, json=page1, match=[matchers.query_param_matcher({**base, "per_page": "50"})])
+    responses.get(url, json=page2, match=[matchers.query_param_matcher({**base, **second_params})])
+
+
+@responses.activate
+def test_pagination_follows_next_page_url(client):
+    """Live shape: next_page and next_cursor are both full URLs."""
+    url = f"{BASE}/fixtures/between/2026-08-21/2026-11-28"
+    _two_page_mock(url, {
+        "count": 50, "per_page": 50, "current_page": 1, "has_more": True,
+        "next_page": f"{url}?page=2&per_page=50&filters=fixtureLeagues%3A8",
+        "next_cursor": f"{url}?cursor=WzEsNTAsWzE5MTM0NDU0XV0",
+    }, {"page": "2", "per_page": "50"})
+    fixtures = client.fixtures_between(date(2026, 8, 21), date(2026, 11, 28))
+    assert [f["id"] for f in fixtures] == [1001, 1002, 1003]
+    assert all("cursor" not in c.request.url for c in responses.calls)
+
+
+@responses.activate
+def test_pagination_extracts_token_from_cursor_url(client):
+    url = f"{BASE}/fixtures/between/2026-08-21/2026-11-28"
+    _two_page_mock(url, {
+        "count": 50, "per_page": 50, "current_page": 1, "has_more": True,
+        "next_cursor": f"{url}?cursor=WzEsNTAsWzE5MTM0NDU0XV0",
+    }, {"cursor": "WzEsNTAsWzE5MTM0NDU0XV0"})
+    fixtures = client.fixtures_between(date(2026, 8, 21), date(2026, 11, 28))
+    assert [f["id"] for f in fixtures] == [1001, 1002, 1003]
+    assert "per_page" not in responses.calls[1].request.url
+
+
 @responses.activate
 def test_date_range_split_into_100_day_windows(client):
     empty = {"data": [], "pagination": {"has_more": False, "next_cursor": None}}
