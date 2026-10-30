@@ -1,0 +1,18 @@
+# EPL prediction — operator box crontab (edit paths, then `crontab deploy/crontab.example`).
+# Token comes from /opt/epl/.env (gitignored) via the CLI's .env loader; never put it in this file.
+# All times UTC (CRON_TZ requires cronie; otherwise run the box in UTC).
+CRON_TZ=UTC
+EPL=/opt/epl/premier-league-prediction
+BIN=/opt/epl/premier-league-prediction/.venv/bin/epl
+
+# Odds snapshots: scheduler tick every 15 min (fetches only what is due: opening / T-6h / T-1h / 24h refresh).
+*/15 * * * * cd $EPL && $BIN sync due >> logs/sync_due.log 2>&1
+
+# Seasons + full current-season fixtures (results/HT scores) once a day.
+10 4 * * * cd $EPL && $BIN sync seasons >> logs/sync.log 2>&1 && $BIN sync fixtures >> logs/sync.log 2>&1
+
+# Predictions for the next matchday, twice a day (stored in the DB for the weekly review).
+30 7,16 * * * cd $EPL && $BIN predict --matchday next -o reports/next_matchday.json >> logs/predict.log 2>&1
+
+# Data-quality audit (non-zero exit = league leak or unmapped team name).
+0 5 * * * cd $EPL && $BIN audit >> logs/audit.log 2>&1
