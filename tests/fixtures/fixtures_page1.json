@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "id": 1001,
+      "sport_id": 1,
+      "league_id": 8,
+      "season_id": 26001,
+      "stage_id": 77480000,
+      "round_id": 390001,
+      "state_id": 5,
+      "name": "Arsenal vs Chelsea",
+      "starting_at": "2026-10-24 14:00:00",
+      "result_info": "Arsenal won after full-time.",
+      "length": 90,
+      "has_odds": true,
+      "starting_at_timestamp": 1792850400,
+      "round": {"id": 390001, "name": "9"},
+      "participants": [
+        {"id": 19, "name": "Arsenal", "short_code": "ARS", "meta": {"location": "home", "winner": true, "position": 1}},
+        {"id": 18, "name": "Chelsea", "short_code": "CHE", "meta": {"location": "away", "winner": false, "position": 2}}
+      ],
+      "scores": [
+        {"id": 1, "fixture_id": 1001, "type_id": 1, "participant_id": 19, "score": {"goals": 1, "participant": "home"}, "description": "1ST_HALF"},
+        {"id": 2, "fixture_id": 1001, "type_id": 1, "participant_id": 18, "score": {"goals": 0, "participant": "away"}, "description": "1ST_HALF"},
+        {"id": 3, "fixture_id": 1001, "type_id": 2, "participant_id": 19, "score": {"goals": 2, "participant": "home"}, "description": "2ND_HALF"},
+        {"id": 4, "fixture_id": 1001, "type_id": 2, "participant_id": 18, "score": {"goals": 1, "participant": "away"}, "description": "2ND_HALF"},
+        {"id": 5, "fixture_id": 1001, "type_id": 1525, "participant_id": 19, "score": {"goals": 2, "participant": "home"}, "description": "CURRENT"},
+        {"id": 6, "fixture_id": 1001, "type_id": 1525, "participant_id": 18, "score": {"goals": 1, "participant": "away"}, "description": "CURRENT"}
+      ]
+    }
+  ],
+  "pagination": {"count": 1, "per_page": 1, "current_page": 1, "next_cursor": "CURSOR-2", "has_more": true},
+  "rate_limit": {"resets_in_seconds": 3400, "remaining": 2998, "requested_entity": "Fixture"},
+  "timezone": "UTC"
+}

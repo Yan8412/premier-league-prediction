@@ -1,0 +1,38 @@
+{
+  "data": {
+    "id": 8,
+    "sport_id": 1,
+    "country_id": 462,
+    "name": "Premier League",
+    "active": true,
+    "short_code": "UK PL",
+    "type": "league",
+    "sub_type": "domestic",
+    "currentseason": {
+      "id": 26001,
+      "sport_id": 1,
+      "league_id": 8,
+      "name": "2026/2027",
+      "finished": false,
+      "pending": false,
+      "is_current": true,
+      "starting_at": "2026-08-21",
+      "ending_at": "2027-05-23"
+    },
+    "seasons": [
+      {
+        "id": 25583,
+        "sport_id": 1,
+        "league_id": 8,
+        "name": "2025/2026",
+        "finished": true,
+        "pending": false,
+        "is_current": false,
+        "starting_at": "2025-08-15",
+        "ending_at": "2026-05-24"
+      }
+    ]
+  },
+  "rate_limit": {"resets_in_seconds": 3500, "remaining": 2999, "requested_entity": "League"},
+  "timezone": "UTC"
+}

@@ -1,0 +1,17 @@
+{
+  "data": [
+    {"id": 901, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "1/1", "value": "4.20", "name": "Home/Home", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 902, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "1/X", "value": "15.00", "name": "Home/Draw", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 903, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "1/2", "value": "26.00", "name": "Home/Away", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 904, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "X/1", "value": "5.50", "name": "Draw/Home", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 905, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "X/X", "value": "5.00", "name": "Draw/Draw", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 906, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "X/2", "value": "6.50", "name": "Draw/Away", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 907, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "2/1", "value": "29.00", "name": "Away/Home", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 908, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "2/X", "value": "15.00", "name": "Away/Draw", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 909, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 2, "label": "2/2", "value": "4.75", "name": "Away/Away", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 950, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 9, "label": "1/1", "value": "4.30", "name": "Home/Home", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 9, "name": "Betfair"}},
+    {"id": 951, "fixture_id": 1002, "market_id": 29, "bookmaker_id": 9, "label": "Mystery", "value": "9.00", "name": "Unknown selection", "market_description": "HT/FT Double", "stopped": false, "bookmaker": {"id": 9, "name": "Betfair"}}
+  ],
+  "rate_limit": {"resets_in_seconds": 3299, "remaining": 2989, "requested_entity": "Odd"},
+  "timezone": "UTC"
+}
