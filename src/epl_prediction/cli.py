@@ -252,7 +252,7 @@ def cmd_review(args) -> int:
     if args.period == "weekly":
         print(json.dumps(weekly_review(_conn(args), days=args.days), indent=2))
     else:
-        print(json.dumps(monthly_review(), indent=2))
+        print(json.dumps(monthly_review(_conn(args), run_backtest_=not args.skip_backtest), indent=2, default=str))
     return 0
 
 
@@ -327,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     r = sub.add_parser("review", help="self-upgrade hooks: weekly post-match / monthly refresh")
     r.add_argument("period", choices=["weekly", "monthly"])
     r.add_argument("--days", type=int, default=7)
+    r.add_argument("--skip-backtest", action="store_true", help="monthly: only refit live weights")
     r.set_defaults(func=cmd_review)
     return p
 

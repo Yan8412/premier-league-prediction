@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from . import __version__
-from .config import EPL_LEAGUE_ID, MARKET_FT_1X2, MARKET_HT_FT, REPORTS_DIR
+from .config import EPL_LEAGUE_ID, LIVE_WEIGHTS_PATH, MARKET_FT_1X2, MARKET_HT_FT, REPORTS_DIR
 from .data.football_data import load_all
 from .data.teams import canonical_team
 from .data.xg import attach_xg
@@ -83,11 +83,20 @@ def fit_football(history: pd.DataFrame, as_of: pd.Timestamp | None = None,
     return model.fit(history, as_of=as_of)
 
 
-def load_pool_weight(report: Path = REPORTS_DIR / "backtest_epl.json", kind: str = "close") -> float:
-    """Football weight fitted on historical out-of-sample log-loss (latest season in the report).
+def load_pool_weight(report: Path = REPORTS_DIR / "backtest_epl.json", kind: str = "close",
+                     live: Path = LIVE_WEIGHTS_PATH) -> float:
+    """Football weight of the log pool, by precedence:
 
-    ``kind="htft"`` needs stored football + market HT/FT predictions (written by
-    ``epl review monthly``); until then the prior weight is used."""
+    1. live weight fitted by ``epl review monthly`` on stored pre-kickoff predictions
+       (``reports/ensemble_weights.json``; key "1x2" for close/open, "htft");
+    2. backtest weight (latest season in the backtest report; 1X2 only);
+    3. prior 0.5."""
+    try:
+        w = json.loads(live.read_text(encoding="utf-8"))["htft" if kind == "htft" else "1x2"]["w_football"]
+        if w is not None:
+            return float(w)
+    except (OSError, KeyError, ValueError):
+        pass
     try:
         weights = json.loads(report.read_text(encoding="utf-8"))["ensemble_weight_football"][kind]
         return float(weights[max(weights)])
