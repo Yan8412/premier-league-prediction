@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from . import __version__
-from .config import MARKET_FT_1X2, MARKET_HT_FT, REPORTS_DIR
+from .config import EPL_LEAGUE_ID, MARKET_FT_1X2, MARKET_HT_FT, REPORTS_DIR
 from .data.football_data import load_all
 from .data.teams import canonical_team
 from .models.dixon_coles import DixonColesModel, dc_score_matrix, invert_1x2
@@ -54,7 +54,8 @@ def load_history(conn: sqlite3.Connection | None = None) -> pd.DataFrame:
     if conn is not None:
         rows = conn.execute(
             f"SELECT starting_at, home_team, away_team, ft_home, ft_away, ht_home, ht_away FROM fixtures "
-            f"WHERE state_id IN ({','.join(map(str, FINISHED_STATES))}) AND ft_home IS NOT NULL").fetchall()
+            f"WHERE league_id={EPL_LEAGUE_ID} AND state_id IN ({','.join(map(str, FINISHED_STATES))}) "
+            f"AND ft_home IS NOT NULL").fetchall()
         if rows:
             sm = pd.DataFrame([{
                 "date": pd.Timestamp(r["starting_at"][:10]), "home": canonical_team(r["home_team"]),
@@ -237,18 +238,19 @@ def next_matchday_fixture_ids(conn: sqlite3.Connection, now: datetime | None = N
     """All not-started fixtures in the round of the earliest upcoming fixture."""
     now_ts = int((now or datetime.now(timezone.utc)).timestamp())
     first = conn.execute(
-        "SELECT round_id, season_id FROM fixtures WHERE starting_at_timestamp >= ? AND (state_id IS NULL OR state_id=?) "
-        "ORDER BY starting_at_timestamp LIMIT 1", (now_ts, NOT_STARTED_STATE)).fetchone()
+        "SELECT round_id, season_id FROM fixtures WHERE league_id=? AND starting_at_timestamp >= ? "
+        "AND (state_id IS NULL OR state_id=?) ORDER BY starting_at_timestamp LIMIT 1",
+        (EPL_LEAGUE_ID, now_ts, NOT_STARTED_STATE)).fetchone()
     if first is None:
         return []
     if first["round_id"] is None:
         rows = conn.execute(
-            "SELECT id FROM fixtures WHERE starting_at_timestamp BETWEEN ? AND ? ORDER BY starting_at_timestamp",
-            (now_ts, now_ts + 7 * 86400)).fetchall()
+            "SELECT id FROM fixtures WHERE league_id=? AND starting_at_timestamp BETWEEN ? AND ? "
+            "ORDER BY starting_at_timestamp", (EPL_LEAGUE_ID, now_ts, now_ts + 7 * 86400)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id FROM fixtures WHERE round_id=? AND (state_id IS NULL OR state_id=?) ORDER BY starting_at_timestamp",
-            (first["round_id"], NOT_STARTED_STATE)).fetchall()
+            "SELECT id FROM fixtures WHERE league_id=? AND round_id=? AND (state_id IS NULL OR state_id=?) "
+            "ORDER BY starting_at_timestamp", (EPL_LEAGUE_ID, first["round_id"], NOT_STARTED_STATE)).fetchall()
     return [r["id"] for r in rows]
 
 

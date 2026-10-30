@@ -48,6 +48,6 @@ def insert(conn: sqlite3.Connection, table: str, rows: Iterable[dict[str, Any]])
     return len(rows)
 
 
-def log_sync(conn: sqlite3.Connection, command: str, detail: dict) -> None:
+def log_sync(conn: sqlite3.Connection, command: str, detail: dict, run_at: str | None = None) -> None:
     conn.execute("INSERT INTO sync_log (run_at, command, detail_json) VALUES (?, ?, ?)",
-                 (utcnow_iso(), command, json.dumps(detail, default=str)))
+                 (run_at or utcnow_iso(), command, json.dumps(detail, default=str)))
