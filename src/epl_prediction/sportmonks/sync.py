@@ -17,7 +17,7 @@ from typing import Iterable
 
 from ..config import EPL_LEAGUE_ID, MARKET_FT_1X2, MARKET_HT_FT
 from ..db import insert, log_sync, upsert, utcnow_iso
-from .client import SportmonksClient, SportmonksError
+from .client import FIXTURE_INCLUDES, SportmonksClient, SportmonksError
 from .parse import NOT_STARTED_STATE, parse_fixture, parse_odds, parse_teams
 
 log = logging.getLogger(__name__)
@@ -74,25 +74,38 @@ def store_fixtures(conn: sqlite3.Connection, raw_fixtures: Iterable[dict]) -> in
         for t in parse_teams(fx):
             teams[t["id"]] = t
     upsert(conn, "teams", teams.values())
-    return upsert(conn, "fixtures", fixtures)
+    return upsert(conn, "fixtures", fixtures, keep_existing=("xg_home", "xg_away"))
 
 
 def sync_fixtures(client: SportmonksClient, conn: sqlite3.Connection, start: date, end: date,
-                  league_id: int = EPL_LEAGUE_ID) -> int:
-    n = store_fixtures(conn, client.fixtures_between(start, end, league_id))
-    log_sync(conn, "sync_fixtures", {"start": start, "end": end, "n": n})
+                  league_id: int = EPL_LEAGUE_ID, with_xg: bool = False) -> int:
+    """``with_xg`` adds ``include=xGFixture`` (needs the Sportmonks xG add-on); on 403 it
+    warns and syncs without xG."""
+    raw = None
+    if with_xg:
+        try:
+            raw = client.fixtures_between(start, end, league_id, include=f"{FIXTURE_INCLUDES};xGFixture")
+        except SportmonksError as exc:
+            if exc.status != 403:
+                raise
+            log.warning("xGFixture include not in plan (HTTP 403): syncing fixtures without xG")
+    if raw is None:
+        raw = client.fixtures_between(start, end, league_id)
+    n = store_fixtures(conn, raw)
+    log_sync(conn, "sync_fixtures", {"start": start, "end": end, "n": n, "with_xg": with_xg})
     conn.commit()
     return n
 
 
-def sync_season_fixtures(client: SportmonksClient, conn: sqlite3.Connection, season_id: int) -> int:
+def sync_season_fixtures(client: SportmonksClient, conn: sqlite3.Connection, season_id: int,
+                         with_xg: bool = False) -> int:
     row = conn.execute("SELECT starting_at, ending_at FROM seasons WHERE id=?", (season_id,)).fetchone()
     if row and row["starting_at"] and row["ending_at"]:
         start, end = date.fromisoformat(row["starting_at"][:10]), date.fromisoformat(row["ending_at"][:10])
     else:
         s = client.season(season_id)
         start, end = date.fromisoformat(s["starting_at"][:10]), date.fromisoformat(s["ending_at"][:10])
-    return sync_fixtures(client, conn, start, end)
+    return sync_fixtures(client, conn, start, end, with_xg=with_xg)
 
 
 def sync_fixture(client: SportmonksClient, conn: sqlite3.Connection, fixture_id: int) -> dict:

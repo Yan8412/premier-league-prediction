@@ -23,15 +23,33 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(resources.files("epl_prediction").joinpath("schema.sql").read_text(encoding="utf-8"))
+    _migrate(conn)
     return conn
 
 
-def upsert(conn: sqlite3.Connection, table: str, rows: Iterable[dict[str, Any]], key: str = "id") -> int:
+# Columns added after a table was first created (CREATE TABLE IF NOT EXISTS won't add them).
+ADDED_COLUMNS = {"fixtures": {"xg_home": "REAL", "xg_away": "REAL"}}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, cols in ADDED_COLUMNS.items():
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col, typ in cols.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+    conn.commit()
+
+
+def upsert(conn: sqlite3.Connection, table: str, rows: Iterable[dict[str, Any]], key: str = "id",
+           keep_existing: Iterable[str] = ()) -> int:
+    """Insert or update. Columns in ``keep_existing`` are only overwritten by non-NULL values."""
     rows = list(rows)
     if not rows:
         return 0
     cols = list(rows[0].keys())
-    updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != key)
+    keep = set(keep_existing)
+    updates = ", ".join(f"{c}=COALESCE(excluded.{c}, {c})" if c in keep else f"{c}=excluded.{c}"
+                        for c in cols if c != key)
     sql = (f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)}) "
            f"ON CONFLICT({key}) DO UPDATE SET {updates}")
     conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
