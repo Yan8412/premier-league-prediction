@@ -16,3 +16,9 @@ BIN=/opt/epl/premier-league-prediction/.venv/bin/epl
 
 # Data-quality audit (non-zero exit = league leak or unmapped team name).
 0 5 * * * cd $EPL && $BIN audit >> logs/audit.log 2>&1
+
+# Self-upgrade cadence.
+# Weekly post-match review (Monday, after the weekend round): reports/reviews/weekly_<date>.{json,md}
+0 6 * * 1 cd $EPL && $BIN sync fixtures --with-xg >> logs/sync.log 2>&1; $BIN review weekly >> logs/review.log 2>&1
+# Monthly review (1st of month): re-run backtest, refit live pool weights -> reports/ensemble_weights.json
+30 6 1 * * cd $EPL && $BIN review monthly >> logs/review.log 2>&1
