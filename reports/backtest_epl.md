@@ -1,6 +1,6 @@
 # EPL 走步回测报告 (Walk-forward backtest)
 
-- 生成时间 generated_at: `2026-10-30T14:35:24+00:00`  模型版本: `epl-prediction 0.1.0`
+- 生成时间 generated_at: `2026-10-30T15:00:11+00:00`  模型版本: `epl-prediction 0.1.0`
 - 数据: football-data.co.uk E0（`data/football_data/`），测试赛季 2021, 2122, 2223, 2324, 2425, 2526, 2627
 - 每周（周一为界）用此前全部比赛重拟合 Dixon-Coles：xi=0.0019/天，L2=0.01，窗口 1100 天
 - 市场：各家庄 1X2 赔率逐家 shin 去水后取平均；closing=收盘赔率，open=开盘（周五前后采集）
@@ -30,12 +30,20 @@
 | 2526 | 380 | 1.0247 | 1.0125 | 1.0125 | 0.00 | 0.208 | 0.203 |
 | 2627 | 80 | 1.0294 | 1.0164 | 1.0164 | 0.00 | 0.200 | 0.263 |
 
+## HT/FT（半场/全场 9 类，足球轨 path A）
+
+| model | n | log-loss | Brier | accuracy |
+|---|---:|---:|---:|---:|
+| football (half-split DC) | 2360 | 1.8837 | 0.8044 | 0.321 |
+| base rate (历史频率) | 2360 | 1.9704 | 0.8383 | 0.267 |
+
+均匀分布 9 类 log-loss = 2.1972。football-data 无 HT/FT 赔率，市场/集成 HT/FT 需 Sportmonks market 29 历史快照积累后评估。
+
 ## 说明
 
 - log-loss / Brier / RPS 越低越好；TOP2 = 真实比分落在模型概率最高的两个比分中的比例。
 - 市场 TOP2：由去水后的 1X2 反推 Dixon-Coles (λ, μ)；集成 TOP2：按集成 1X2 对足球模型比分矩阵分区重加权。
 - w_football = 0 表示历史 log-loss 认为纯足球模型对收盘赔率没有增量信息，此时集成 1X2 退化为市场轨（比分 TOP2 仍保留足球模型的比分形状）。`epl predict --football-weight` 可手动覆盖。
-- football-data 无 HT/FT 赔率，故本报告不含 HT/FT；HT/FT 走 Sportmonks market 29（见 README）。
 - 仅供研究/参考，不构成投注建议，系统不做自动下注。
 
-复现：`epl backtest`（耗时约 11.7 秒）。
+复现：`epl backtest`（耗时约 13.1 秒）。

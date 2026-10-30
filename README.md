@@ -4,9 +4,9 @@
 
 | 轨道 | 输入 | 方法 | 输出 |
 |---|---|---|---|
-| **football**（纯足球） | 历史比分（不含任何赔率特征） | Dixon-Coles + 时间衰减 → 期望进球 → 比分矩阵 | 1X2、TOP2 比分（HT/FT 足球路径留到 v1） |
+| **football**（纯足球） | 历史比分（不含任何赔率特征） | Dixon-Coles + 时间衰减 → 期望进球 → 比分矩阵；半场拆分（path A）→ HT/FT | 1X2、HT/FT、TOP2 比分 |
 | **market**（纯市场） | 多家庄赔率 | 1X2 用 Shin 去水，HT/FT（9 维）用乘法去水，跨庄平均 | 1X2、HT/FT（Sportmonks market 29）、TOP2 比分 |
-| **ensemble**（集成） | 上述两条轨道的概率 | 对数意见池 p ∝ p_f^w · p_m^(1-w)，w 由历史 log-loss 拟合 | 1X2、HT/FT、TOP2 比分 |
+| **ensemble**（集成） | 上述两条轨道的概率 | 对数意见池 p ∝ p_f^w · p_m^(1-w)；1X2 与 HT/FT 各自一个权重 | 1X2、HT/FT、TOP2 比分 |
 
 每场比赛、每条轨道输出：`p_1x2[3]`、`p_htft[9]`、`top2_scores[{score,p}×2]`、`model_version`、`generated_at`。
 
@@ -108,7 +108,7 @@ epl data --seasons 2026              # 重新下载/更新某赛季 CSV（起始
 3. 每家庄的收盘（及开盘）1X2 逐家 Shin 去水后取平均作为市场轨；
 4. 第 S 赛季的集成权重 w 只用更早赛季的样本外预测拟合（首个测试赛季用先验 0.5）。
 
-指标：log-loss、Brier、RPS、准确率、TOP2 精确比分命中率。最新结果见 [`reports/backtest_epl.md`](reports/backtest_epl.md)。目前的结论：收盘赔率（log-loss ≈ 0.964）优于纯 Dixon-Coles（≈ 0.988），历史拟合得到的足球权重 w≈0，即集成在 1X2 上基本等于市场轨；足球轨的价值主要在于没有赔率时提供独立估计，以及比分分布 / TOP2。
+指标：log-loss、Brier、RPS、准确率、TOP2 精确比分命中率；HT/FT 9 类 log-loss / Brier（足球轨 vs 历史频率基线）。最新结果见 [`reports/backtest_epl.md`](reports/backtest_epl.md)。目前的结论：收盘赔率（log-loss ≈ 0.964）优于纯 Dixon-Coles（≈ 0.988），历史拟合得到的足球权重 w≈0，即集成在 1X2 上基本等于市场轨；足球轨的价值主要在于没有赔率时提供独立估计，以及比分分布 / TOP2。
 
 各家庄的列名每个赛季都不同（如 2026/27 没有 Pinnacle），加载器会按列自动识别；`Max*`/`Avg*` 聚合列与 Betfair 交易所列不参与庄家共识。
 
@@ -137,13 +137,31 @@ epl predict --home Arsenal --away "Manchester City" --date 2026-11-01 \
   "outcome_order_htft": ["H/H", "H/D", "H/A", "D/H", "D/D", "D/A", "A/H", "A/D", "A/A"],
   "usage": "仅供参考/研究 (tip / research reference only) — no auto-betting.",
   "tracks": {
-    "football": {"p_1x2": [0.46, 0.29, 0.25], "p_htft": null, "top2_scores": [{"score": "1-1", "p": 0.137}, {"score": "1-0", "p": 0.106}],
-                 "expected_goals": {"home": 1.48, "away": 1.04}, "model_version": "...", "generated_at": "..."},
+    "football": {"p_1x2": [0.4585, 0.2864, 0.2551],
+                 "p_htft": [0.2913, 0.0594, 0.0193, 0.147, 0.1812, 0.1033, 0.0202, 0.0458, 0.1325],
+                 "top2_scores": [{"score": "1-1", "p": 0.137}, {"score": "1-0", "p": 0.106}],
+                 "expected_goals": {"home": 1.48, "away": 1.04}, "expected_goals_first_half": {"home": 0.68, "away": 0.42},
+                 "consistency": {"htft_ft_margin_max_abs_diff": 0.0}, "model_version": "...", "generated_at": "..."},
     "market":   {"available": true, "p_1x2": [...], "p_htft": [...9...], "top2_scores": [...], "n_bookmakers_1x2": 12, ...},
-    "ensemble": {"p_1x2": [...], "p_htft": [...], "top2_scores": [...], "weights": {"football": 0.0, "market": 1.0}, ...}
+    "ensemble": {"p_1x2": [...], "p_htft": [...], "top2_scores": [...], "weights": {"football": 0.0, "market": 1.0},
+                 "weights_htft": {"football": 0.5, "market": 0.5}, ...}
   }
 }
 ```
+
+### HT/FT（半场/全场）
+
+足球轨的 HT/FT 已上线（原 MVP 的“留到 v1”已取消），采用 path A：
+
+- 与全场共用进攻/防守参数，按“上半场进球占比” s_h / s_a（时间衰减加权拟合，英超近年约主 0.46 / 客 0.40）把期望进球拆成上半场 (λ·s_h, μ·s_a) 与下半场 (λ·(1−s_h), μ·(1−s_a))；
+- 上半场比分用轻量 Dixon-Coles（单独拟合的 ρ_ht），下半场为独立泊松，二者卷积得到 (半场比分, 全场比分) 的联合分布，再映射到 9 类（主主 H/H … 客客 A/A）；
+- 全场比分边际直接取全场 Dixon-Coles 矩阵，因此足球轨的 `p_htft` 按全场结果求和**严格等于** `p_1x2`，并与 TOP2 比分来自同一比分过程。
+
+集成轨 HT/FT = 足球与市场（market 29）HT/FT 的对数意见池（权重 `weights_htft`，默认先验 0.5，可用 `--football-weight-htft` 覆盖），再按集成 1X2 校正全场边际，保证集成 `p_htft` 与集成 `p_1x2` 一致。没有市场 HT/FT 时集成 HT/FT 取足球轨（会在 notes 注明）。回测中足球 HT/FT 的 9 类 log-loss 约 1.88，优于历史频率基线 1.97（均匀分布 2.20）。
+
+### 输出约定与一致性检查
+
+每条轨道都包含 `p_1x2`、`p_htft`、`top2_scores`、`model_version`、`generated_at`，以及 `consistency.htft_ft_margin_max_abs_diff`（HT/FT 全场边际与 1X2 的最大偏差）。`epl predict` 会用 `epl_prediction.contract.validate_prediction` 自动校验（长度、概率和为 1、TOP2 格式、足球/集成轨 HT/FT 与 1X2 一致），不符合时在 stderr 打印 `contract warning`。市场轨的两个市场来自不同盘口，偏差如实报告、不强行校正。
 
 TOP2 比分说明：足球轨直接取比分矩阵概率最高的两格；市场轨把去水后的 1X2 反解为 Dixon-Coles 的 (λ, μ) 后取比分；集成轨把足球比分矩阵按集成 1X2 对“主胜/平/客胜”三个区域重新加权后取比分。
 
@@ -154,7 +172,7 @@ epl review weekly    # 赛后复盘：已完赛比赛 vs 存储的预测，按�
 epl review monthly   # 重跑走步回测，刷新报告和集成权重
 ```
 
-TODO（v1）：每月重新调 ξ / L2、校准曲线、漂移告警、足球轨 HT/FT 路径。
+TODO（v1）：每月重新调 ξ / L2、校准曲线、漂移告警。
 
 ## 7. xG
 

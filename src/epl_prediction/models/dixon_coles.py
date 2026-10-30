@@ -22,27 +22,11 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares, minimize
 from scipy.special import gammaln
-from scipy.stats import poisson
 
-from .score_matrix import matrix_to_1x2, normalise
+from .halftime import DEFAULT_FIRST_HALF_SHARE, fit_half_params, htft_probs
+from .score_matrix import RHO_BOUNDS, dc_score_matrix, matrix_to_1x2, normalise, tau_matrix  # noqa: F401
 
 DEFAULT_XI = 0.0019  # per day, ~1 year half-life (DC paper: 0.0065 per half-week)
-RHO_BOUNDS = (-0.25, 0.25)
-
-
-def tau_matrix(lam: float, mu: float, rho: float, max_goals: int) -> np.ndarray:
-    t = np.ones((max_goals + 1, max_goals + 1))
-    t[0, 0] = 1.0 - lam * mu * rho
-    t[0, 1] = 1.0 + lam * rho
-    t[1, 0] = 1.0 + mu * rho
-    t[1, 1] = 1.0 - rho
-    return np.clip(t, 1e-10, None)
-
-
-def dc_score_matrix(lam: float, mu: float, rho: float, max_goals: int = 10) -> np.ndarray:
-    goals = np.arange(max_goals + 1)
-    m = np.outer(poisson.pmf(goals, lam), poisson.pmf(goals, mu))
-    return normalise(m * tau_matrix(lam, mu, rho, max_goals))
 
 
 def invert_1x2(target_1x2: Sequence[float], rho: float = -0.05, max_goals: int = 10) -> tuple[float, float]:
@@ -71,6 +55,9 @@ class DixonColesModel:
     defence: np.ndarray | None = None
     home_adv: float = 0.25
     rho: float = -0.05
+    ht_share_home: float = DEFAULT_FIRST_HALF_SHARE
+    ht_share_away: float = DEFAULT_FIRST_HALF_SHARE
+    rho_ht: float = 0.0
     n_matches: int = 0
     converged: bool = False
 
@@ -86,7 +73,8 @@ class DixonColesModel:
         max_days: int | None = 1100,
         warm_start: "DixonColesModel | None" = None,
     ) -> "DixonColesModel":
-        """``matches`` needs columns date, home, away, hg, ag. Only rows strictly
+        """``matches`` needs columns date, home, away, hg, ag (optional hthg, htag
+        for the HT/FT half split). Only rows strictly
         before ``as_of`` (default: day after last match) are used."""
         df = matches.dropna(subset=["hg", "ag"])
         as_of = pd.Timestamp(as_of) if as_of is not None else df["date"].max() + pd.Timedelta(days=1)
@@ -171,6 +159,11 @@ class DixonColesModel:
         self.home_adv, self.rho = float(theta[-2]), float(theta[-1])
         self.n_matches = int(len(df))
         self.converged = bool(res.success)
+        if {"hthg", "htag"} <= set(df.columns):
+            lam = np.exp(self.home_adv + self.attack[h] + self.defence[a])
+            mu = np.exp(self.attack[a] + self.defence[h])
+            self.ht_share_home, self.ht_share_away, self.rho_ht = fit_half_params(
+                lam, mu, x, y, df["hthg"].to_numpy(dtype=float), df["htag"].to_numpy(dtype=float), w)
         return self
 
     # -------------------------------------------------------------- predict
@@ -194,6 +187,11 @@ class DixonColesModel:
         lam, mu = self.expected_goals(home, away)
         return dc_score_matrix(lam, mu, self.rho, self.max_goals)
 
+    def predict_htft(self, home: str, away: str) -> np.ndarray:
+        lam, mu = self.expected_goals(home, away)
+        ft = dc_score_matrix(lam, mu, self.rho, self.max_goals)
+        return htft_probs(lam, mu, self.ht_share_home, self.ht_share_away, self.rho_ht, ft)
+
     def predict_1x2(self, home: str, away: str) -> np.ndarray:
         return matrix_to_1x2(self.score_matrix(home, away))
 
@@ -206,6 +204,9 @@ class DixonColesModel:
             "l2": self.l2,
             "home_adv": self.home_adv,
             "rho": self.rho,
+            "ht_share_home": self.ht_share_home,
+            "ht_share_away": self.ht_share_away,
+            "rho_ht": self.rho_ht,
             "n_matches": self.n_matches,
             "converged": self.converged,
             "teams": {t: {"attack": float(a), "defence": float(d)}

@@ -171,7 +171,14 @@ def cmd_predict(args) -> int:
     model = P.fit_football(history, pd.Timestamp(as_of) if as_of else None)
     weight = args.football_weight if args.football_weight is not None else P.load_pool_weight()
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    preds = [P.predict_fixture(model, fx, weight, args.devig, generated_at) for fx in fixtures]
+    htft_weight = (args.football_weight_htft if args.football_weight_htft is not None
+                   else P.load_pool_weight(kind="htft"))
+    preds = [P.predict_fixture(model, fx, weight, args.devig, generated_at, htft_weight) for fx in fixtures]
+    from .contract import validate_prediction
+
+    for pred in preds:
+        for err in validate_prediction(pred):
+            print(f"contract warning ({pred['home']} v {pred['away']}): {err}", file=sys.stderr)
     if conn is not None and not args.no_store and any(p["fixture_id"] for p in preds):
         P.store_predictions(conn, [p for p in preds if p["fixture_id"]])
 
@@ -236,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--date", help="offline mode: match date YYYY-MM-DD (model uses only earlier results)")
     pr.add_argument("--odds", action="append", help="offline mode: H,D,A decimal odds, repeat per bookmaker")
     pr.add_argument("--football-weight", type=float, help="override log-pool weight on the football track")
+    pr.add_argument("--football-weight-htft", type=float, help="override log-pool weight for HT/FT (default prior 0.5)")
     pr.add_argument("--devig", default="shin", choices=["shin", "multiplicative"])
     pr.add_argument("--no-db", action="store_true", help="do not read the SQLite DB")
     pr.add_argument("--no-store", action="store_true", help="do not store predictions in the DB")

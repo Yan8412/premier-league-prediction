@@ -25,9 +25,10 @@ from ..config import REPORTS_DIR
 from ..data.football_data import load_all
 from ..models.dixon_coles import DEFAULT_XI, DixonColesModel, dc_score_matrix, invert_1x2
 from ..models.ensemble import fit_pool_weight, log_pool_rows
+from ..models.halftime import htft_index, htft_probs
 from ..models.market import consensus_1x2
 from ..models.score_matrix import matrix_to_1x2, reweight_to_1x2, top_k_scores
-from .metrics import summary
+from .metrics import accuracy, brier, log_loss, summary
 
 TRACKS = ("football", "market_close", "ensemble_close", "market_open", "ensemble_open")
 
@@ -91,6 +92,9 @@ def run_backtest(cfg: BacktestConfig | None = None, log=print) -> BacktestResult
                 "lam": lam, "mu": mu, "rho": model.rho,
                 "home_known": r["home"] in model.teams, "away_known": r["away"] in model.teams,
                 "matrix": m, "odds_close": r["odds_close"], "odds_open": r["odds_open"],
+                "htft": htft_probs(lam, mu, model.ht_share_home, model.ht_share_away, model.rho_ht, m),
+                "htft_class": (htft_index(int(r["hthg"]), int(r["htag"]), int(r["hg"]), int(r["ag"]))
+                               if pd.notna(r["hthg"]) and pd.notna(r["htag"]) else -1),
             })
         if (k + 1) % 20 == 0 or k == len(weeks) - 1:
             log(f"[backtest] week {k + 1}/{len(weeks)} ({pd.Timestamp(week).date()}) fitted on {model.n_matches} matches")
@@ -133,8 +137,31 @@ def run_backtest(cfg: BacktestConfig | None = None, log=print) -> BacktestResult
     pred["top2_market_close"] = hits_m
     pred["top2_ensemble_close"] = hits_e
 
-    pred = pred.drop(columns=["matrix", "odds_close", "odds_open"])
+    pred[[f"fh_{k}" for k in range(9)]] = np.vstack(pred["htft"].to_numpy())
+    # HT/FT baseline: class frequencies of all earlier played matches (expanding window).
+    hist_cls = played.dropna(subset=["hthg", "htag"])
+    hist_idx = np.array([htft_index(*map(int, v)) for v in hist_cls[["hthg", "htag", "hg", "ag"]].to_numpy()])
+    base = np.zeros((len(pred), 9))
+    for s in test_seasons:
+        prior = hist_idx[(hist_cls["season"] < s).to_numpy()]
+        freq = (np.bincount(prior, minlength=9) + 1) / (len(prior) + 9)
+        base[(pred["season"] == s).to_numpy()] = freq
+    pred[[f"bh_{k}" for k in range(9)]] = base
+
+    pred = pred.drop(columns=["matrix", "odds_close", "odds_open", "htft"])
     return BacktestResult(cfg, pred, weights, time.time() - t0)
+
+
+def htft_metrics(pred: pd.DataFrame) -> dict[str, dict]:
+    """Football HT/FT (9-class) vs the expanding base-rate baseline."""
+    sub = pred[pred["htft_class"] >= 0]
+    y = sub["htft_class"].to_numpy()
+    out = {}
+    for name, prefix in (("football", "fh"), ("base_rate", "bh")):
+        probs = sub[[f"{prefix}_{k}" for k in range(9)]].to_numpy()
+        out[name] = {"n": int(len(y)), "log_loss": log_loss(probs, y), "brier": brier(probs, y),
+                     "accuracy": accuracy(probs, y)}
+    return out
 
 
 _TRACK_COLS = {
@@ -183,6 +210,8 @@ def write_report(result: BacktestResult, out_dir: Path = REPORTS_DIR, name: str 
         "ensemble_weight_football": result.weights,
         "overall": overall,
         "per_season": per_season,
+        "htft_overall": htft_metrics(pred),
+        "htft_per_season": {s: htft_metrics(g) for s, g in pred.groupby("season")},
         "runtime_s": round(result.runtime_s, 1),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +250,13 @@ def write_report(result: BacktestResult, out_dir: Path = REPORTS_DIR, name: str 
                      f"{fmt(m['market_close']['log_loss'])} | {fmt(m['ensemble_close']['log_loss'])} | "
                      f"{fmt(result.weights['close'].get(s), 2)} | {fmt(m['football']['top2_hit'], 3)} | "
                      f"{fmt(m['ensemble_close']['top2_hit'], 3)} |")
+    h = payload["htft_overall"]
+    lines += ["", "## HT/FT（半场/全场 9 类，足球轨 path A）", "",
+              "| model | n | log-loss | Brier | accuracy |", "|---|---:|---:|---:|---:|"]
+    for key, label in (("football", "football (half-split DC)"), ("base_rate", "base rate (历史频率)")):
+        lines.append(f"| {label} | {h[key]['n']} | {fmt(h[key]['log_loss'])} | {fmt(h[key]['brier'])} | "
+                     f"{fmt(h[key]['accuracy'], 3)} |")
+    lines += ["", f"均匀分布 9 类 log-loss = {np.log(9):.4f}。football-data 无 HT/FT 赔率，市场/集成 HT/FT 需 Sportmonks market 29 历史快照积累后评估。"]
     lines += [
         "",
         "## 说明",
@@ -229,7 +265,6 @@ def write_report(result: BacktestResult, out_dir: Path = REPORTS_DIR, name: str 
         "- 市场 TOP2：由去水后的 1X2 反推 Dixon-Coles (λ, μ)；集成 TOP2：按集成 1X2 对足球模型比分矩阵分区重加权。",
         "- w_football = 0 表示历史 log-loss 认为纯足球模型对收盘赔率没有增量信息，此时集成 1X2 退化为市场轨"
         "（比分 TOP2 仍保留足球模型的比分形状）。`epl predict --football-weight` 可手动覆盖。",
-        "- football-data 无 HT/FT 赔率，故本报告不含 HT/FT；HT/FT 走 Sportmonks market 29（见 README）。",
         "- 仅供研究/参考，不构成投注建议，系统不做自动下注。",
         "",
         f"复现：`epl backtest`（耗时约 {payload['runtime_s']} 秒）。",
