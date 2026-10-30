@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
 FOOTBALL_DATA_DIR = DATA_DIR / "football_data"
 REPORTS_DIR = REPO_ROOT / "reports"
+LIVE_WEIGHTS_PATH = REPORTS_DIR / "ensemble_weights.json"  # written by `epl review monthly`
 
 SPORTMONKS_BASE_URL_DEFAULT = "https://api.sportmonks.com/v3/football"
 EPL_LEAGUE_ID = 8

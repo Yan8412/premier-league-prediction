@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt && pip install -e .
+      - run: pytest
+      # Offline smoke: one-season walk-forward backtest on the committed football-data CSVs.
+      - run: epl backtest --test-seasons 2425 --name ci_backtest
+      # Live Sportmonks smoke is skipped unless the repo secret is configured.
+      - run: epl smoke
+        env:
+          SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}

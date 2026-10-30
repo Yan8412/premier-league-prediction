@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# CI smoke outputs
+reports/ci_backtest.*
+
 # runtime databases / caches
 data/*.db
 data/*.db-journal

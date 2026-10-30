@@ -145,7 +145,7 @@ epl predict --home Arsenal --away "Manchester City" --date 2026-11-01 \
 ```
 
 - 足球轨训练数据 = football-data CSV + 数据库中已完赛的 Sportmonks 比赛（球队名统一为 football-data 写法，映射表见 `src/epl_prediction/team_names.csv`），只使用开球日期之前的比赛。
-- 集成权重默认读取 `reports/backtest_epl.json` 中最近赛季的拟合值；`--football-weight 0.3` 可手动覆盖。
+- 集成权重：优先读取月度复盘写出的线上权重 `reports/ensemble_weights.json`，其次 `reports/backtest_epl.json` 中最近赛季的回测权重（仅 1X2），否则用 0.5；`--football-weight 0.3` / `--football-weight-htft 0.6` 可手动覆盖。
 - 使用数据库时，预测会写入 `predictions` 表，供每周复盘使用。
 
 输出示例（节选）：
@@ -185,14 +185,27 @@ epl predict --home Arsenal --away "Manchester City" --date 2026-11-01 \
 
 TOP2 比分说明：足球轨直接取比分矩阵概率最高的两格；市场轨把去水后的 1X2 反解为 Dixon-Coles 的 (λ, μ) 后取比分；集成轨把足球比分矩阵按集成 1X2 对“主胜/平/客胜”三个区域重新加权后取比分。
 
-## 6. 自我升级钩子（MVP 仅搭架子）
+## 6. 自我升级节奏（每周赛后 + 每月复盘）
+
+需要在运营机上运行（数据库在那里），`epl predict --fixture-id/--matchday` 会把每条轨道的预测（含 `p_1x2`、`p_htft`、TOP2）写入 `predictions` 表。
 
 ```bash
-epl review weekly    # 赛后复盘：已完赛比赛 vs 存储的预测，按轨道计算指标，写 reports/reviews/weekly_*.json
-epl review monthly   # 重跑走步回测，刷新报告和集成权重
+epl review weekly                 # 每周赛后复盘
+epl review weekly --days 14
+epl review monthly                # 每月复盘：重跑回测 + 拟合线上权重
+epl review monthly --skip-backtest
 ```
 
-TODO（v1）：每月重新调 ξ / L2、校准曲线、漂移告警。
+- **每周**：对最近 N 天已完赛的比赛，取每条轨道**开球前**最后一次预测（开球后生成的预测一律不计），计算 1X2 log-loss / Brier / RPS / 准确率、HT/FT 9 类 log-loss / 准确率、TOP2 比分命中率，写 `reports/reviews/weekly_<日期>.json/.md`。
+- **每月**：
+  1. 重跑走步回测，刷新 `reports/backtest_epl.*`（含回测 1X2 权重）；
+  2. 用全部“开球前预测 + 已知赛果”的线上样本，分别拟合 1X2 与 HT/FT 的对数意见池足球权重，写入 `reports/ensemble_weights.json`；样本少于 50 场时不拟合（保留回落值）；
+  3. 写 `reports/reviews/monthly_<日期>.json/.md`（回测摘要、线上权重、最近 30 天各轨道表现）。
+- `epl predict` 的权重优先级：线上权重（`ensemble_weights.json`）> 回测权重（仅 1X2）> 先验 0.5。HT/FT 集成权重因此会在 market 29 线上样本积累后自动从 0.5 更新。
+- 调度：`deploy/crontab.example` 已包含每周一 06:00（UTC）赛后复盘和每月 1 日 06:30 月度复盘。
+- CI：`.github/workflows/ci.yml` 在每个 PR / main 推送时运行 `pytest` 和一个单赛季离线回测；仓库配置了 `SPORTMONKS_API_TOKEN` secret 时还会跑 `epl smoke`，未配置时自动 SKIP。
+
+TODO（v1）：每月重新调 ξ / L2 / xG 权重、校准曲线、漂移告警。
 
 ## 7. xG
 
