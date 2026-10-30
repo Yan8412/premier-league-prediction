@@ -4,6 +4,7 @@ import pytest
 import responses
 from responses import matchers
 
+from epl_prediction.contract import validate_prediction
 from epl_prediction.db import connect
 from epl_prediction.predict import (fit_football, fixture_inputs_from_db, load_history, next_matchday_fixture_ids,
                                     predict_fixture, store_predictions)
@@ -183,15 +184,19 @@ def test_sync_to_sqlite_and_predict_end_to_end(client, conn, tmp_path):
         assert len(t[name]["p_1x2"]) == 3 and sum(t[name]["p_1x2"]) == pytest.approx(1, abs=1e-3)
         assert len(t[name]["top2_scores"]) == 2
         assert t[name]["model_version"] and t[name]["generated_at"]
-    assert t["football"]["p_htft"] is None
+    assert len(t["football"]["p_htft"]) == 9 and sum(t["football"]["p_htft"]) == pytest.approx(1, abs=1e-3)
     assert len(t["market"]["p_htft"]) == 9 and t["market"]["n_bookmakers_htft"] == 1
-    assert t["ensemble"]["p_htft"] == t["market"]["p_htft"]
+    assert t["ensemble"]["p_htft"] not in (t["market"]["p_htft"], t["football"]["p_htft"])  # fused
     assert t["ensemble"]["weights"] == {"football": 0.3, "market": 0.7}
+    assert t["ensemble"]["weights_htft"] == {"football": 0.5, "market": 0.5}
+    assert validate_prediction(p_liv) == []
 
     p_wol = predict_fixture(model, inputs[1])  # no odds at all
     assert p_wol["home"] == "Wolves" and p_wol["away"] == "Brighton"
     assert p_wol["tracks"]["market"]["available"] is False
     assert p_wol["tracks"]["ensemble"]["p_1x2"] == p_wol["tracks"]["football"]["p_1x2"]
+    assert p_wol["tracks"]["ensemble"]["p_htft"] == p_wol["tracks"]["football"]["p_htft"]
+    assert validate_prediction(p_wol) == []
 
     store_predictions(conn, [p_liv, p_wol])
     assert conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0] == 5  # wolves market track skipped
