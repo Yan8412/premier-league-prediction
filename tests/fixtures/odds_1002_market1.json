@@ -1,0 +1,12 @@
+{
+  "data": [
+    {"id": 501, "fixture_id": 1002, "market_id": 1, "bookmaker_id": 2, "label": "Home", "value": "2.40", "name": "Home", "market_description": "Match Winner", "stopped": false, "latest_bookmaker_update": "2030-10-31 10:00:00", "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 502, "fixture_id": 1002, "market_id": 1, "bookmaker_id": 2, "label": "Draw", "value": "3.60", "name": "Draw", "market_description": "Match Winner", "stopped": false, "latest_bookmaker_update": "2030-10-31 10:00:00", "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 503, "fixture_id": 1002, "market_id": 1, "bookmaker_id": 2, "label": "Away", "value": "2.80", "name": "Away", "market_description": "Match Winner", "stopped": false, "latest_bookmaker_update": "2030-10-31 10:00:00", "bookmaker": {"id": 2, "name": "bet365"}},
+    {"id": 511, "fixture_id": 1002, "market_id": 1, "bookmaker_id": 9, "label": "1", "value": "2.45", "name": "Home", "market_description": "Match Winner", "stopped": false, "latest_bookmaker_update": "2030-10-31 10:05:00", "bookmaker": {"id": 9, "name": "Betfair"}},
+    {"id": 512, "fixture_id": 1002, "market_id": 1, "bookmaker_id": 9, "label": "X", "value": "3.50", "name": "Draw", "market_description": "Match Winner", "stopped": false, "latest_bookmaker_update": "2030-10-31 10:05:00", "bookmaker": {"id": 9, "name": "Betfair"}},
+    {"id": 513, "fixture_id": 1002, "market_id": 1, "bookmaker_id": 9, "label": "2", "value": "2.75", "name": "Away", "market_description": "Match Winner", "stopped": false, "latest_bookmaker_update": "2030-10-31 10:05:00", "bookmaker": {"id": 9, "name": "Betfair"}}
+  ],
+  "rate_limit": {"resets_in_seconds": 3300, "remaining": 2990, "requested_entity": "Odd"},
+  "timezone": "UTC"
+}
