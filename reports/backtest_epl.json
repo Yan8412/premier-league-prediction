@@ -1,6 +1,6 @@
 {
   "model_version": "epl-prediction 0.1.0",
-  "generated_at": "2026-10-30T15:00:11+00:00",
+  "generated_at": "2026-10-30T15:09:56+00:00",
   "data": "football-data.co.uk E0 CSVs in data/football_data/",
   "config": {
     "test_seasons": [
@@ -14,11 +14,13 @@
     ],
     "xi_per_day": 0.0019,
     "l2": 0.01,
+    "xg_weight": 0.5,
     "max_days": 1100,
     "devig_method_1x2": "shin",
     "prior_weight": 0.5
   },
   "n_matches": 2360,
+  "n_training_matches_with_xg": 80,
   "n_matches_scored_all_tracks": 2360,
   "n_matches_with_unseen_team": 10,
   "base_rates_HDA": [
@@ -49,11 +51,11 @@
   "overall": {
     "football": {
       "n": 2360,
-      "log_loss": 0.988242721849096,
-      "brier": 0.5883608161213436,
-      "rps": 0.20438776972355005,
-      "accuracy": 0.5245762711864407,
-      "top2_hit": 0.2080508474576271
+      "log_loss": 0.9881284302224427,
+      "brier": 0.5883038513730711,
+      "rps": 0.2043374404092798,
+      "accuracy": 0.523728813559322,
+      "top2_hit": 0.20847457627118643
     },
     "market_close": {
       "n": 2360,
@@ -61,7 +63,7 @@
       "brier": 0.5724049159729657,
       "rps": 0.19663746575929772,
       "accuracy": 0.5491525423728814,
-      "top2_hit": 0.21991525423728814
+      "top2_hit": 0.22033898305084745
     },
     "ensemble_close": {
       "n": 2360,
@@ -344,11 +346,11 @@
     "2627": {
       "football": {
         "n": 80,
-        "log_loss": 1.0293738882512975,
-        "brier": 0.6166803258936516,
-        "rps": 0.2084338351992458,
-        "accuracy": 0.475,
-        "top2_hit": 0.2
+        "log_loss": 1.02600228526503,
+        "brier": 0.6149998658196122,
+        "rps": 0.20694912042827393,
+        "accuracy": 0.45,
+        "top2_hit": 0.2125
       },
       "market_close": {
         "n": 80,
@@ -356,7 +358,7 @@
         "brier": 0.6093116865612254,
         "rps": 0.2024478419254443,
         "accuracy": 0.475,
-        "top2_hit": 0.2375
+        "top2_hit": 0.25
       },
       "ensemble_close": {
         "n": 80,
@@ -387,9 +389,9 @@
   "htft_overall": {
     "football": {
       "n": 2360,
-      "log_loss": 1.883683209403474,
-      "brier": 0.8044331857216898,
-      "accuracy": 0.3211864406779661
+      "log_loss": 1.8835430825100683,
+      "brier": 0.8043906104115254,
+      "accuracy": 0.32033898305084746
     },
     "base_rate": {
       "n": 2360,
@@ -486,9 +488,9 @@
     "2627": {
       "football": {
         "n": 80,
-        "log_loss": 1.8885593068941688,
-        "brier": 0.8130191727899433,
-        "accuracy": 0.2875
+        "log_loss": 1.8844255635387062,
+        "brier": 0.8117632011400906,
+        "accuracy": 0.2625
       },
       "base_rate": {
         "n": 80,
@@ -498,5 +500,5 @@
       }
     }
   },
-  "runtime_s": 13.1
+  "runtime_s": 13.3
 }

@@ -59,14 +59,14 @@ def cmd_sync(args) -> int:
     if what in ("fixtures", "all"):
         if args.date_from and args.date_to:
             n = sync.sync_fixtures(client, conn, date.fromisoformat(args.date_from), date.fromisoformat(args.date_to),
-                                   args.league_id)
+                                   args.league_id, with_xg=args.with_xg)
         else:
             season_id = args.season_id
             if season_id is None:
                 if sync.current_season(conn, args.league_id) is None:
                     sync.sync_seasons(client, conn, args.league_id)
                 season_id = sync.current_season(conn, args.league_id)["id"]
-            n = sync.sync_season_fixtures(client, conn, season_id)
+            n = sync.sync_season_fixtures(client, conn, season_id, with_xg=args.with_xg)
         print(f"fixtures: {n} upserted")
     if what == "fixture":
         if not args.fixture_id:
@@ -129,11 +129,42 @@ def cmd_coverage(args) -> int:
     return 0
 
 
+def cmd_xg(args) -> int:
+    from .data import xg
+
+    if args.action == "import":
+        if args.understat:
+            df = xg.UnderstatXG(Path(args.understat)).match_xg()
+            source = "understat"
+        elif args.csv:
+            df = xg.CsvXG(Path(args.csv), args.source).match_xg()
+            source = args.source
+        else:
+            raise SystemExit("xg import needs --understat FILE or --csv FILE")
+        if df.empty:
+            raise SystemExit("no finished matches with xG found in the file")
+        print(f"imported {len(df)} matches -> {xg.save_to_store(df, source)}")
+        return 0
+    store = xg.load_store()
+    hist = xg.attach_xg(load_all_played(), [store])
+    by = hist.loc[hist["hxg"].notna()].groupby(hist["date"].dt.year)["xg_source"].value_counts()
+    print(json.dumps({"store_rows": int(len(store)), "history_matches_with_xg": int(hist["hxg"].notna().sum()),
+                      "by_year_and_source": {f"{y}/{s}": int(n) for (y, s), n in by.items()}}, indent=2))
+    return 0
+
+
+def load_all_played():
+    from .data.football_data import load_all
+
+    df = load_all()
+    return df[df["result"] >= 0][["date", "home", "away", "hg", "ag", "hxg", "axg"]]
+
+
 # ---------------------------------------------------------------- backtest
 def cmd_backtest(args) -> int:
     from .backtest.walkforward import BacktestConfig, run_backtest, write_report
 
-    cfg = BacktestConfig(xi=args.xi, l2=args.l2, devig_method=args.devig,
+    cfg = BacktestConfig(xi=args.xi, l2=args.l2, xg_weight=args.xg_weight, devig_method=args.devig,
                          test_seasons=args.test_seasons.split(",") if args.test_seasons else None,
                          data_dir=Path(args.data_dir) if args.data_dir else None)
     result = run_backtest(cfg)
@@ -191,7 +222,7 @@ def cmd_predict(args) -> int:
     elif fixtures and fixtures[0].kickoff:
         as_of = datetime.fromisoformat(fixtures[0].kickoff[:10])
     history = P.load_history(conn)
-    model = P.fit_football(history, pd.Timestamp(as_of) if as_of else None)
+    model = P.fit_football(history, pd.Timestamp(as_of) if as_of else None, xg_weight=args.xg_weight)
     weight = args.football_weight if args.football_weight is not None else P.load_pool_weight()
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     htft_weight = (args.football_weight_htft if args.football_weight_htft is not None
@@ -241,6 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fixture-id", type=int, action="append", help="repeatable")
     s.add_argument("--upcoming-days", type=int, default=7, help="odds: fixtures kicking off within N days")
     s.add_argument("--markets", default=f"{MARKET_FT_1X2},{MARKET_HT_FT}", help="odds market ids (default 1,29)")
+    s.add_argument("--with-xg", action="store_true", help="fixtures: also fetch xGFixture (Sportmonks xG add-on)")
     s.add_argument("--horizon-days", type=int, default=14, help="due: look-ahead for opening snapshots")
     s.add_argument("--refresh-hours", type=float, default=24.0, help="due: interim refresh age")
     s.set_defaults(func=cmd_sync)
@@ -255,6 +287,13 @@ def build_parser() -> argparse.ArgumentParser:
     sm = sub.add_parser("smoke", help="live Sportmonks smoke test (skips without token)")
     sm.set_defaults(func=cmd_smoke)
 
+    x = sub.add_parser("xg", help="xG store: import Understat/CSV files, show coverage")
+    x.add_argument("action", choices=["import", "status"])
+    x.add_argument("--understat", help="Understat match-list JSON saved by you (no crawling; see README)")
+    x.add_argument("--csv", help="CSV with date,home,away,hxg,axg")
+    x.add_argument("--source", default="csv", help="label for --csv imports")
+    x.set_defaults(func=cmd_xg)
+
     d = sub.add_parser("data", help="download football-data.co.uk EPL CSVs")
     d.add_argument("--seasons", required=True, help="start years, e.g. 2024,2025")
     d.set_defaults(func=cmd_data)
@@ -262,6 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("backtest", help="walk-forward backtest on football-data CSVs")
     b.add_argument("--xi", type=float, default=0.0019)
     b.add_argument("--l2", type=float, default=1e-2)
+    b.add_argument("--xg-weight", type=float, default=0.5, help="xG share of Poisson targets where xG exists (0 = goals only)")
     b.add_argument("--devig", default="shin", choices=["shin", "multiplicative"])
     b.add_argument("--test-seasons", help="comma list of season codes, e.g. 2324,2425")
     b.add_argument("--data-dir")
@@ -277,6 +317,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--odds", action="append", help="offline mode: H,D,A decimal odds, repeat per bookmaker")
     pr.add_argument("--football-weight", type=float, help="override log-pool weight on the football track")
     pr.add_argument("--football-weight-htft", type=float, help="override log-pool weight for HT/FT (default prior 0.5)")
+    pr.add_argument("--xg-weight", type=float, help="xG share of Poisson targets where xG exists (default 0.5)")
     pr.add_argument("--devig", default="shin", choices=["shin", "multiplicative"])
     pr.add_argument("--no-db", action="store_true", help="do not read the SQLite DB")
     pr.add_argument("--no-store", action="store_true", help="do not store predictions in the DB")

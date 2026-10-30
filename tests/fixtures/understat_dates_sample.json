@@ -1,0 +1,12 @@
+[
+  {"id": "26602", "isResult": true, "h": {"id": "83", "title": "Arsenal", "short_title": "ARS"},
+   "a": {"id": "80", "title": "Chelsea", "short_title": "CHE"}, "goals": {"h": "2", "a": "1"},
+   "xG": {"h": "1.84213", "a": "0.912345"}, "datetime": "2025-11-01 17:30:00",
+   "forecast": {"w": "0.62", "d": "0.22", "l": "0.16"}},
+  {"id": "26603", "isResult": true, "h": {"id": "88", "title": "Manchester City", "short_title": "MCI"},
+   "a": {"id": "229", "title": "Wolverhampton Wanderers", "short_title": "WOL"}, "goals": {"h": "3", "a": "0"},
+   "xG": {"h": "2.71", "a": "0.33"}, "datetime": "2025-11-01 15:00:00"},
+  {"id": "26604", "isResult": false, "h": {"id": "87", "title": "Liverpool", "short_title": "LIV"},
+   "a": {"id": "82", "title": "Tottenham", "short_title": "TOT"}, "goals": {"h": null, "a": null},
+   "xG": {"h": null, "a": null}, "datetime": "2030-11-02 16:30:00"}
+]

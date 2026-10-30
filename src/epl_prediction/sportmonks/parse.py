@@ -6,6 +6,7 @@ from typing import Any
 
 # Sportmonks fixture states treated as final (docs: "retain finished states 5, 7 and 8").
 FINISHED_STATES = {5, 7, 8}
+XG_TYPE_ID = 5304  # "Expected Goals (xG)" in include=xGFixture / GET /expected/fixtures
 NOT_STARTED_STATE = 1
 
 
@@ -22,6 +23,18 @@ def _score(fx: dict, description: str, side: str) -> int | None:
         if s.get("description") == description and sc.get("participant") == side:
             goals = sc.get("goals")
             return int(goals) if goals is not None else None
+    return None
+
+
+def _xg(fx: dict, location: str) -> float | None:
+    items = fx.get("xgfixture") or fx.get("xGFixture") or fx.get("xgFixture") or []
+    for it in items if isinstance(items, list) else []:
+        if it.get("type_id") == XG_TYPE_ID and it.get("location") == location:
+            value = (it.get("data") or {}).get("value", it.get("value"))
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
     return None
 
 
@@ -53,6 +66,8 @@ def parse_fixture(fx: dict) -> dict[str, Any]:
         "ht_home": _score(fx, "1ST_HALF", "home"),
         "ht_away": _score(fx, "1ST_HALF", "away"),
         "result_info": fx.get("result_info"),
+        "xg_home": _xg(fx, "home"),
+        "xg_away": _xg(fx, "away"),
     }
 
 

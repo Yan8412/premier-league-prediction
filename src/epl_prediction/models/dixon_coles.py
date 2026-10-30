@@ -50,6 +50,9 @@ class DixonColesModel:
     xi: float = DEFAULT_XI
     l2: float = 1e-2  # chosen on 2020/21-2022/23 walk-forward only
     max_goals: int = 10
+    # Weight of xG in the Poisson targets where xG exists: target = a*xG + (1-a)*goals.
+    # The rho / low-score correction always uses actual goals.
+    xg_weight: float = 0.5
     teams: list[str] = field(default_factory=list)
     attack: np.ndarray | None = None
     defence: np.ndarray | None = None
@@ -59,6 +62,7 @@ class DixonColesModel:
     ht_share_away: float = DEFAULT_FIRST_HALF_SHARE
     rho_ht: float = 0.0
     n_matches: int = 0
+    n_xg_matches: int = 0
     converged: bool = False
 
     @property
@@ -90,8 +94,17 @@ class DixonColesModel:
         idx = {t: k for k, t in enumerate(teams)}
         h = df["home"].map(idx).to_numpy()
         a = df["away"].map(idx).to_numpy()
-        x = df["hg"].to_numpy(dtype=float)
-        y = df["ag"].to_numpy(dtype=float)
+        x_obs = df["hg"].to_numpy(dtype=float)
+        y_obs = df["ag"].to_numpy(dtype=float)
+        x, y = x_obs, y_obs
+        self.n_xg_matches = 0
+        if self.xg_weight > 0 and {"hxg", "axg"} <= set(df.columns):
+            hx, ax = df["hxg"].to_numpy(dtype=float), df["axg"].to_numpy(dtype=float)
+            has = ~(np.isnan(hx) | np.isnan(ax))
+            a_ = self.xg_weight
+            x = np.where(has, a_ * np.nan_to_num(hx) + (1 - a_) * x_obs, x_obs)
+            y = np.where(has, a_ * np.nan_to_num(ax) + (1 - a_) * y_obs, y_obs)
+            self.n_xg_matches = int(has.sum())
         w = np.exp(-self.xi * days)
         w = w / w.sum()
         n = len(teams)
@@ -108,7 +121,8 @@ class DixonColesModel:
             # Rough start from mean goals keeps L-BFGS-B iterations low.
             x0[n:2 * n] = np.log(max((x.mean() + y.mean()) / 2, 0.1))
 
-        is00, is01, is10, is11 = (x == 0) & (y == 0), (x == 0) & (y == 1), (x == 1) & (y == 0), (x == 1) & (y == 1)
+        is00, is01, is10, is11 = ((x_obs == 0) & (y_obs == 0), (x_obs == 0) & (y_obs == 1),
+                                  (x_obs == 1) & (y_obs == 0), (x_obs == 1) & (y_obs == 1))
         const = (gammaln(x + 1) + gammaln(y + 1)) @ w
         l2 = self.l2
 
@@ -163,7 +177,7 @@ class DixonColesModel:
             lam = np.exp(self.home_adv + self.attack[h] + self.defence[a])
             mu = np.exp(self.attack[a] + self.defence[h])
             self.ht_share_home, self.ht_share_away, self.rho_ht = fit_half_params(
-                lam, mu, x, y, df["hthg"].to_numpy(dtype=float), df["htag"].to_numpy(dtype=float), w)
+                lam, mu, x_obs, y_obs, df["hthg"].to_numpy(dtype=float), df["htag"].to_numpy(dtype=float), w)
         return self
 
     # -------------------------------------------------------------- predict
@@ -209,6 +223,8 @@ class DixonColesModel:
             "rho_ht": self.rho_ht,
             "n_matches": self.n_matches,
             "converged": self.converged,
+            "xg_weight": self.xg_weight,
+            "n_xg_matches": self.n_xg_matches,
             "teams": {t: {"attack": float(a), "defence": float(d)}
                       for t, a, d in zip(self.teams, self.attack, self.defence)},
         }

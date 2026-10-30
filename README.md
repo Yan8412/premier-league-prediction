@@ -196,12 +196,25 @@ TODO（v1）：每月重新调 ξ / L2、校准曲线、漂移告警。
 
 ## 7. xG
 
-`src/epl_prediction/data/xg.py` 定义了 `XGProvider` 接口：
+足球轨的 Dixon-Coles 已接入 xG 混合：有 xG 的比赛用 `a·xG + (1−a)·实际进球` 作为泊松拟合目标（默认 a = 0.5，`--xg-weight` 可调，0 = 只用进球）；低比分修正 ρ 与半场拆分仍用实际进球。无 xG 的比赛照常只用进球。
 
-- `FootballDataXG`：读取 football-data 自 2026/27 起提供的 `HxG`/`AxG` 列（离线可用）；
-- `UnderstatXG`：占位实现（抛 `NotImplementedError`），docstring 中写了抓取方案。Understat 没有官方 API，页面结构不稳定，留到 v1。
+xG 来源（按比赛日期 ±1 天 + 统一队名合并，先到先得）：
 
-MVP 的模型暂不使用 xG。
+| 来源 | 方式 | 说明 |
+|---|---|---|
+| football-data | 自动 | 2026/27 起 CSV 自带 `HxG`/`AxG` |
+| Sportmonks | `epl sync fixtures --with-xg` | `include=xGFixture`（type 5304），需要 Sportmonks **xG Basic 附加包**；套餐不含时 403 会自动降级为不带 xG 同步，且不会清掉已存的 xG |
+| Understat | `epl xg import --understat 文件.json` | **只做文件导入，不爬取**（见下） |
+| 任意 CSV | `epl xg import --csv 文件.csv --source 名称` | 列：date, home, away, hxg, axg |
+
+```bash
+epl xg status                                   # 训练历史中有 xG 的比赛数（按年份/来源）
+epl xg import --understat ~/Downloads/epl_2025.json
+```
+
+**关于 Understat 的合规说明**：understat.com 的 `robots.txt` 为 `User-agent: * / Disallow: /`（2026-10 核对），即不允许任何自动抓取，且页面已不再内嵌比赛 JSON。因此本项目**不提供爬虫**。如果你通过其条款允许的方式拿到了 Understat 的比赛列表数据（例如自己在浏览器中保存、或获得授权的副本），可用上面的命令导入；格式为 Understat 的 `datesData` 比赛列表（`datetime`、`isResult`、`h.title`、`a.title`、`xG.h`、`xG.a`）。导入后规范化保存到 `data/xg/<来源>_<起>_<止>.csv`。合规的线上来源建议使用 Sportmonks xG 附加包。
+
+回测现状：目前只有 2026/27 的 80 场有 xG（football-data）。在这 80 场上 a=0.5 比纯进球的 log-loss 略好（1.0260 vs 1.0294），但样本太小，0.5 只是暂定值；xG 历史积累后用 `epl backtest --xg-weight ...` 重新评估。
 
 ## 8. 目录结构
 
